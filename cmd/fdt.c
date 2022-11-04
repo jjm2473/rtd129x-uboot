@@ -13,7 +13,7 @@
 #include <linux/ctype.h>
 #include <linux/types.h>
 #include <asm/global_data.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <fdt_support.h>
 #include <mapmem.h>
 #include <asm/io.h>
@@ -151,11 +151,9 @@ static int do_fdt(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	}
 
 	if (!working_fdt) {
-		puts(
-			"No FDT memory address configured. Please configure\n"
-			"the FDT address via \"fdt addr <address>\" command.\n"
-			"Aborting!\n");
-		return CMD_RET_FAILURE;
+		working_fdt = (void *)gd->fdt_blob;
+		printf("No FDT memory address configured. Default at 0x%08lx\n",
+		       (ulong)gd->fdt_blob);
 	}
 
 	/*
@@ -256,7 +254,7 @@ static int do_fdt(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 		char *pathp;		/* path */
 		char *prop;		/* property */
 		int  nodeoffset;	/* node offset from libfdt */
-		static char data[SCRATCHPAD];	/* storage for the property */
+		static char data[SCRATCHPAD] __aligned(4);/* property storage */
 		const void *ptmp;
 		int  len;		/* new length of the property */
 		int  ret;		/* return value */
@@ -667,11 +665,10 @@ static int do_fdt(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 		if (!fdt_valid(&blob))
 			return CMD_RET_FAILURE;
 
-		ret = fdt_overlay_apply(working_fdt, blob);
-		if (ret) {
-			printf("fdt_overlay_apply(): %s\n", fdt_strerror(ret));
+		/* apply method prints messages on error */
+		ret = fdt_overlay_apply_verbose(working_fdt, blob);
+		if (ret)
 			return CMD_RET_FAILURE;
-		}
 	}
 #endif
 	/* resize the fdt */

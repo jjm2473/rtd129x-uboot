@@ -12,6 +12,7 @@
 #include <image.h>
 #include <malloc.h>
 #include <memalign.h>
+#include <misc.h>
 #include <u-boot/zlib.h>
 #include <div64.h>
 
@@ -42,7 +43,7 @@ void gzfree(void *x, void *addr, unsigned nb)
 	free (addr);
 }
 
-int gunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp)
+int gzip_parse_header(const unsigned char *src, unsigned long len)
 {
 	int i, flags;
 
@@ -50,7 +51,7 @@ int gunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp)
 	i = 10;
 	flags = src[3];
 	if (src[2] != DEFLATED || (flags & RESERVED) != 0) {
-		puts ("Error: Bad gzipped data\n");
+		debug("Error: Bad gzipped data\n");
 		return (-1);
 	}
 	if ((flags & EXTRA_FIELD) != 0)
@@ -63,12 +64,31 @@ int gunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp)
 			;
 	if ((flags & HEAD_CRC) != 0)
 		i += 2;
-	if (i >= *lenp) {
+	if (i >= len) {
 		puts ("Error: gunzip out of data in header\n");
 		return (-1);
 	}
+	return i;
+}
 
-	return zunzip(dst, dstlen, src, lenp, 1, i);
+int gunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp)
+{
+	int offset = gzip_parse_header(src, *lenp);
+
+	if (offset < 0)
+		return offset;
+
+#if defined(CONFIG_MISC_DECOMPRESS) && !defined(CONFIG_SPL_BUILD)
+	int ret;
+
+	ret = misc_decompress_process((ulong)dst, (ulong)src, *lenp,
+				      DECOM_GZIP, false, (u64 *)lenp, 0);
+	if (!ret)
+		return 0;
+
+	printf("hw gunzip failed(%d), fallback to soft gunzip\n", ret);
+#endif
+	return zunzip(dst, dstlen, src, lenp, 1, offset);
 }
 
 #ifdef CONFIG_CMD_UNZIP

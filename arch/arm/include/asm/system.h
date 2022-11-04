@@ -78,6 +78,10 @@
 #define HCR_EL2_RW_AARCH64	(1 << 31) /* EL1 is AArch64                   */
 #define HCR_EL2_RW_AARCH32	(0 << 31) /* Lower levels are AArch32         */
 #define HCR_EL2_HCD_DIS		(1 << 29) /* Hypervisor Call disabled         */
+#define HCR_EL2_TGE		(1 << 27) /* Trap General Exceptions          */
+#define HCR_EL2_AMO		(1 << 5)  /* Asynchronous External Abort and SError Interrupt routing */
+#define HCR_EL2_IMO		(1 << 4)  /* Physical IRQ Routing */
+#define HCR_EL2_FMO		(1 << 3)  /* Physical FIQ Routing */
 
 /*
  * CPACR_EL1 bits definitions
@@ -173,6 +177,20 @@ static inline unsigned long read_mpidr(void)
 	asm volatile("mrs %0, mpidr_el1" : "=r" (val));
 
 	return val;
+}
+
+static inline unsigned long get_daif(void)
+{
+	unsigned long daif;
+
+	asm volatile("mrs %0, daif" : "=r" (daif));
+
+	return daif;
+}
+
+static inline void disable_serror(void)
+{
+	asm volatile("msr daifset, #0x04");
 }
 
 #define BSP_COREID	0
@@ -332,37 +350,6 @@ void psci_arch_init(void);
 
 #ifndef __ASSEMBLY__
 
-/**
- * save_boot_params() - Save boot parameters before starting reset sequence
- *
- * If you provide this function it will be called immediately U-Boot starts,
- * both for SPL and U-Boot proper.
- *
- * All registers are unchanged from U-Boot entry. No registers need be
- * preserved.
- *
- * This is not a normal C function. There is no stack. Return by branching to
- * save_boot_params_ret.
- *
- * void save_boot_params(u32 r0, u32 r1, u32 r2, u32 r3);
- */
-
-/**
- * save_boot_params_ret() - Return from save_boot_params()
- *
- * If you provide save_boot_params(), then you should jump back to this
- * function when done. Try to preserve all registers.
- *
- * If your implementation of save_boot_params() is in C then it is acceptable
- * to simply call save_boot_params_ret() at the end of your function. Since
- * there is no link register set up, you cannot just exit the function. U-Boot
- * will return to the (initialised) value of lr, and likely crash/hang.
- *
- * If your implementation of save_boot_params() is in assembler then you
- * should use 'b' or 'bx' to return to save_boot_params_ret.
- */
-void save_boot_params_ret(void);
-
 #ifdef CONFIG_ARMV7_LPAE
 void switch_to_hypervisor_ret(void);
 #endif
@@ -381,6 +368,20 @@ static inline unsigned long get_cpsr(void)
 
 	asm volatile("mrs %0, cpsr" : "=r"(cpsr): );
 	return cpsr;
+}
+
+static inline void set_cpsr(unsigned long cpsr)
+{
+	asm volatile("msr cpsr_fsxc, %[cpsr]" : : [cpsr] "r" (cpsr));
+}
+
+static inline void disable_async_abort(void)
+{
+	unsigned long cpsr;
+
+	cpsr = get_cpsr();
+	cpsr &= ~(1 << 8);
+	set_cpsr(cpsr);
 }
 
 static inline int is_hyp(void)
@@ -434,6 +435,14 @@ static inline void set_dacr(unsigned int val)
 	asm volatile("mcr p15, 0, %0, c3, c0, 0	@ set DACR"
 	  : : "r" (val) : "cc");
 	isb();
+}
+
+static inline unsigned int read_mpidr(void)
+{
+	unsigned int mpidr;
+
+	asm volatile ("mrc p15, 0, %[mpidr], c0, c0, 5" : [mpidr] "=r" (mpidr));
+	return mpidr;
 }
 
 #ifdef CONFIG_ARMV7_LPAE
@@ -555,6 +564,37 @@ void mmu_page_table_flush(unsigned long start, unsigned long stop);
 #endif /* CONFIG_ARM64 */
 
 #ifndef __ASSEMBLY__
+/**
+ * save_boot_params() - Save boot parameters before starting reset sequence
+ *
+ * If you provide this function it will be called immediately U-Boot starts,
+ * both for SPL and U-Boot proper.
+ *
+ * All registers are unchanged from U-Boot entry. No registers need be
+ * preserved.
+ *
+ * This is not a normal C function. There is no stack. Return by branching to
+ * save_boot_params_ret.
+ *
+ * void save_boot_params(u32 r0, u32 r1, u32 r2, u32 r3);
+ */
+
+/**
+ * save_boot_params_ret() - Return from save_boot_params()
+ *
+ * If you provide save_boot_params(), then you should jump back to this
+ * function when done. Try to preserve all registers.
+ *
+ * If your implementation of save_boot_params() is in C then it is acceptable
+ * to simply call save_boot_params_ret() at the end of your function. Since
+ * there is no link register set up, you cannot just exit the function. U-Boot
+ * will return to the (initialised) value of lr, and likely crash/hang.
+ *
+ * If your implementation of save_boot_params() is in assembler then you
+ * should use 'b' or 'bx' to return to save_boot_params_ret.
+ */
+void save_boot_params_ret(void);
+
 /**
  * Change the cache settings for a region.
  *

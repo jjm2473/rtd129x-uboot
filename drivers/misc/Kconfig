@@ -13,6 +13,36 @@ config MISC
 	  set of generic read, write and ioctl methods may be used to
 	  access the device.
 
+config SPL_MISC
+	bool "Enable Driver Model for Misc drivers in SPL"
+	depends on SPL_DM
+	help
+	  Enable driver model for miscellaneous devices. This class is
+	  used only for those do not fit other more general classes. A
+	  set of generic read, write and ioctl methods may be used to
+	  access the device.
+
+config TPL_MISC
+	bool "Enable Driver Model for Misc drivers in TPL"
+	depends on TPL_DM
+	help
+	  Enable driver model for miscellaneous devices. This class is
+	  used only for those do not fit other more general classes. A
+	  set of generic read, write and ioctl methods may be used to
+	  access the device.
+
+config MISC_DECOMPRESS
+	bool "Enable misc decompress driver support"
+	depends on MISC
+	help
+	  Enable misc decompress driver support.
+
+config SPL_MISC_DECOMPRESS
+	bool "Enable misc decompress driver support in SPL"
+	depends on SPL_MISC
+	help
+	  Enable misc decompress driver support in spl.
+
 config ALTERA_SYSID
 	bool "Altera Sysid support"
 	depends on MISC
@@ -40,6 +70,33 @@ config ROCKCHIP_EFUSE
 	  This driver currently supports the RK3399 only, but can easily be
 	  extended (by porting the read function from the Linux kernel sources)
 	  to support other recent Rockchip devices.
+
+config ROCKCHIP_OTP
+	bool "Rockchip OTP Support"
+	depends on MISC
+	help
+	  This is a simple drive to dump specified values of Rockchip SoC
+	  from otp, such as cpu-leakage.
+
+config ROCKCHIP_HW_DECOMPRESS
+	bool "Rockchip HardWare Decompress Support"
+	depends on MISC_DECOMPRESS
+	help
+	  This driver support Decompress IP built-in Rockchip SoC, support
+	  LZ4, GZIP, PNG, ZLIB.
+
+config SPL_ROCKCHIP_HW_DECOMPRESS
+	bool "Rockchip HardWare Decompress Support"
+	depends on SPL_MISC_DECOMPRESS
+	help
+	  This driver support Decompress IP built-in Rockchip SoC, support
+	  LZ4, GZIP, PNG, ZLIB.
+
+config SPL_ROCKCHIP_SECURE_OTP
+	bool "Rockchip Secure OTP Support in spl"
+	depends on SPL_MISC
+	help
+	  Support read & write secure otp in spl.
 
 config CMD_CROS_EC
 	bool "Enable crosec command"

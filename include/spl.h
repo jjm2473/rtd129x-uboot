@@ -8,6 +8,7 @@
 #define	_SPL_H_
 
 /* Platform-specific defines */
+#include <mmc.h>
 #include <linux/compiler.h>
 #include <asm/spl.h>
 
@@ -20,11 +21,25 @@
 #define MMCSD_MODE_FS		2
 #define MMCSD_MODE_EMMCBOOT	3
 
+#define SPL_NEXT_STAGE_UNDEFINED	0
+#define SPL_NEXT_STAGE_UBOOT		1
+#define SPL_NEXT_STAGE_KERNEL		2
+
 struct spl_image_info {
 	const char *name;
 	u8 os;
-	ulong load_addr;
-	ulong entry_point;
+	uintptr_t load_addr;
+	uintptr_t entry_point;		/* Next stage entry point */
+#if CONFIG_IS_ENABLED(ATF)
+	uintptr_t entry_point_bl32;
+	uintptr_t entry_point_bl33;
+#endif
+#if CONFIG_IS_ENABLED(OPTEE) || CONFIG_IS_ENABLED(KERNEL_BOOT)
+	uintptr_t entry_point_os;	/* point to uboot or kernel */
+#endif
+	void *fdt_addr;
+	u32 boot_device;
+	u32 next_stage;
 	u32 size;
 	u32 flags;
 	void *arg;
@@ -68,6 +83,8 @@ int spl_load_simple_fit(struct spl_image_info *spl_image,
 void preloader_console_init(void);
 u32 spl_boot_device(void);
 u32 spl_boot_mode(const u32 boot_device);
+void spl_next_stage(struct spl_image_info *spl);
+void spl_set_bd(void);
 
 /**
  * spl_set_header_raw_uboot() - Set up a standard SPL image structure
@@ -264,10 +281,34 @@ bool spl_was_boot_source(void);
  */
 int spl_dfu_cmd(int usbctrl, char *dfu_alt_info, char *interface, char *devstr);
 
+int spl_mmc_find_device(struct mmc **mmcp, u32 boot_device);
 int spl_mmc_load_image(struct spl_image_info *spl_image,
 		       struct spl_boot_device *bootdev);
 
-void bl31_entry(void);
+/**
+ * spl_invoke_atf - boot using an ARM trusted firmware image
+ */
+void spl_invoke_atf(struct spl_image_info *spl_image);
+
+/**
+ * bl31_entry - Fill bl31_params structure, and jump to bl31
+ */
+void bl31_entry(struct spl_image_info *spl_image,
+		uintptr_t bl31_entry, uintptr_t bl32_entry,
+		uintptr_t bl33_entry, uintptr_t fdt_addr);
+
+/**
+ * spl_optee_entry - entry function for optee
+ *
+ * args defind in op-tee project
+ * https://github.com/OP-TEE/optee_os/
+ * core/arch/arm/kernel/generic_entry_a32.S
+ * @arg0: pagestore
+ * @arg1: (ARMv7 standard bootarg #1)
+ * @arg2: device tree address, (ARMv7 standard bootarg #2)
+ * @arg3: non-secure entry address (ARMv7 bootarg #0)
+ */
+void spl_optee_entry(void *arg0, void *arg1, void *arg2, void *arg3);
 
 /**
  * board_return_to_bootrom - allow for boards to continue with the boot ROM
@@ -278,4 +319,31 @@ void bl31_entry(void);
  * can implement 'board_return_to_bootrom'.
  */
 void board_return_to_bootrom(void);
+
+/**
+ * spl_cleanup_before_jump() - cleanup cache/mmu/interrupt, etc before jump
+ *			       to next stage.
+ */
+void spl_cleanup_before_jump(struct spl_image_info *spl_image);
+
+/**
+ * spl_perform_fixups() - arch/board-specific callback before processing
+ *                        the boot-payload
+ */
+void spl_perform_fixups(struct spl_image_info *spl_image);
+
+/**
+ * spl_board_prepare_for_jump() - arch/board-specific callback exactly before
+ *				  jumping to next stage
+ */
+int spl_board_prepare_for_jump(struct spl_image_info *spl_image);
+
+/**
+ * spl_kernel_partition() - arch/board-specific callback to get kernel partition
+ */
+#ifdef CONFIG_SPL_KERNEL_BOOT
+const char *spl_kernel_partition(struct spl_image_info *spl,
+				 struct spl_load_info *info);
+#endif
+
 #endif

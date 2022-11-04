@@ -11,10 +11,10 @@
 #include <mmc.h>
 #include <dm.h>
 #include <linux/compat.h>
+#include <linux/dma-direction.h>
 #include <linux/io.h>
 #include <linux/sizes.h>
 #include <asm/unaligned.h>
-#include <asm/dma-mapping.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -532,7 +532,7 @@ static void uniphier_sd_set_ddr_mode(struct uniphier_sd_priv *priv,
 	u32 tmp;
 
 	tmp = readl(priv->regbase + UNIPHIER_SD_IF_MODE);
-	if (mmc->ddr_mode)
+	if (mmc_card_ddr(mmc))
 		tmp |= UNIPHIER_SD_IF_MODE_DDR;
 	else
 		tmp &= ~UNIPHIER_SD_IF_MODE_DDR;
@@ -599,7 +599,7 @@ static int uniphier_sd_set_ios(struct udevice *dev)
 	int ret;
 
 	dev_dbg(dev, "clock %uHz, DDRmode %d, width %u\n",
-		mmc->clock, mmc->ddr_mode, mmc->bus_width);
+		mmc->clock, mmc_card_ddr(mmc), mmc->bus_width);
 
 	ret = uniphier_sd_set_bus_width(priv, mmc);
 	if (ret)

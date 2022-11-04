@@ -10,6 +10,7 @@
 #include <common.h>
 #include <dm.h>
 #include <spl.h>
+#include <asm/sections.h>
 #include <asm/u-boot.h>
 #include <nand.h>
 #include <fat.h>
@@ -75,6 +76,29 @@ int __weak bootz_setup(ulong image, ulong *start, ulong *end)
 	 return 1;
 }
 #endif
+
+/* Weak default function for arch/board-specific fixups to the spl_image_info */
+void __weak spl_perform_fixups(struct spl_image_info *spl_image)
+{
+}
+
+/* Get the next stage process */
+__weak void spl_next_stage(struct spl_image_info *spl)
+{
+	spl->next_stage = SPL_NEXT_STAGE_UBOOT;
+}
+
+/* Weak default function for arch/board-specific preppare before jumping */
+int __weak spl_board_prepare_for_jump(struct spl_image_info *spl_image)
+{
+	return 0;
+}
+
+/* Fix storages, like iomux  */
+__weak void spl_board_storages_fixup(struct spl_image_loader *loader)
+{
+	/* Nothing to do! */
+}
 
 void spl_fixup_fdt(void)
 {
@@ -154,11 +178,11 @@ int spl_parse_image_header(struct spl_image_info *spl_image,
 		spl_image->os = image_get_os(header);
 		spl_image->name = image_get_name(header);
 		debug("spl: payload image: %.*s load addr: 0x%lx size: %d\n",
-			(int)sizeof(spl_image->name), spl_image->name,
+			IH_NMLEN, spl_image->name,
 			spl_image->load_addr, spl_image->size);
 #else
 		/* LEGACY image not supported */
-		debug("Legacy boot image support not enabled, proceeding to other boot methods");
+		debug("Legacy boot image support not enabled, proceeding to other boot methods\n");
 		return -EINVAL;
 #endif
 	} else {
@@ -196,7 +220,7 @@ int spl_parse_image_header(struct spl_image_info *spl_image,
 		spl_set_header_raw_uboot(spl_image);
 #else
 		/* RAW image not supported, proceed to other boot methods. */
-		debug("Raw boot image support not enabled, proceeding to other boot methods");
+		debug("Raw boot image support not enabled, proceeding to other boot methods\n");
 		return -EINVAL;
 #endif
 	}
@@ -215,6 +239,45 @@ __weak void __noreturn jump_to_image_no_args(struct spl_image_info *spl_image)
 	image_entry();
 }
 
+/*
+ * 64-bit: No special operation.
+ *
+ * 32-bit: Initial gd->bd->bi_dram[] to active dcache attr of memory.
+ *	   Assuming 256MB is enough for SPL(MMU still maps 4GB size).
+ */
+#ifndef CONFIG_SPL_SYS_DCACHE_OFF
+static int spl_dcache_enable(void)
+{
+	bool free_bd = false;
+
+#ifndef CONFIG_ARM64
+	if (!gd->bd) {
+		gd->bd = calloc(1, sizeof(bd_t));
+		if (!gd->bd) {
+			debug("spl: no bd_t memory\n");
+			return -ENOMEM;
+		}
+		gd->bd->bi_dram[0].start = CONFIG_SYS_SDRAM_BASE;
+		gd->bd->bi_dram[0].size  = SZ_256M;
+		free_bd = true;
+	}
+#endif
+	/* TLB memory should be SZ_16K base align and 4KB end align */
+	gd->arch.tlb_size = PGTABLE_SIZE;
+	gd->arch.tlb_addr = (ulong)memalign(SZ_16K, ALIGN(PGTABLE_SIZE, SZ_4K));
+	if (!gd->arch.tlb_addr) {
+		debug("spl: no TLB memory\n");
+		return -ENOMEM;
+	}
+
+	dcache_enable();
+	if (free_bd)
+		free(gd->bd);
+
+	return 0;
+}
+#endif
+
 static int spl_common_init(bool setup_malloc)
 {
 	int ret;
@@ -228,6 +291,18 @@ static int spl_common_init(bool setup_malloc)
 #endif
 		gd->malloc_limit = CONFIG_VAL(SYS_MALLOC_F_LEN);
 		gd->malloc_ptr = 0;
+	}
+#endif
+
+	/*
+	 * setup D-cache as early as possible after malloc setup
+	 * I-cache has been setup at early assembly code by default.
+	 */
+#ifndef CONFIG_SPL_SYS_DCACHE_OFF
+	ret = spl_dcache_enable();
+	if (ret) {
+		debug("spl_dcache_enable() return error %d\n", ret);
+		return ret;
 	}
 #endif
 	ret = bootstage_init(true);
@@ -258,6 +333,34 @@ static int spl_common_init(bool setup_malloc)
 	return 0;
 }
 
+#if !defined(CONFIG_SPL_SKIP_RELOCATE) && !defined(CONFIG_TPL_BUILD)
+static void spl_setup_relocate(void)
+{
+	gd->relocaddr = CONFIG_SPL_RELOC_TEXT_BASE;
+	gd->new_gd = (gd_t *)gd;
+	gd->start_addr_sp = gd->relocaddr;
+	gd->fdt_size = ALIGN(fdt_totalsize(gd->fdt_blob) + 0x1000, 32);
+
+	gd->start_addr_sp -= gd->fdt_size;
+	gd->new_fdt = (void *)gd->start_addr_sp;
+	memcpy(gd->new_fdt, gd->fdt_blob, gd->fdt_size);
+	gd->fdt_blob = gd->new_fdt;
+
+	gd->reloc_off = gd->relocaddr - (unsigned long)__image_copy_start;
+}
+#else
+static void spl_setup_relocate(void)
+{
+
+}
+#endif
+
+void spl_set_bd(void)
+{
+	if (!gd->bd)
+		gd->bd = &bdata;
+}
+
 int spl_early_init(void)
 {
 	int ret;
@@ -266,6 +369,8 @@ int spl_early_init(void)
 	if (ret)
 		return ret;
 	gd->flags |= GD_FLG_SPL_EARLY_INIT;
+
+	spl_setup_relocate();
 
 	return 0;
 }
@@ -346,12 +451,57 @@ static int boot_from_devices(struct spl_image_info *spl_image,
 		else
 			puts("SPL: Unsupported Boot Device!\n");
 #endif
-		if (loader && !spl_load_image(spl_image, loader))
+		if (loader && !spl_load_image(spl_image, loader)) {
+			spl_image->boot_device = spl_boot_list[i];
 			return 0;
+		}
+
+		spl_board_storages_fixup(loader);
 	}
 
 	return -ENODEV;
 }
+
+#if defined(CONFIG_DM) && !defined(CONFIG_SPL_SKIP_RELOCATE) && !defined(CONFIG_TPL_BUILD)
+static int spl_initr_dm(void)
+{
+	int ret;
+
+	/* Save the pre-reloc driver model and start a new one */
+	gd->dm_root_f = gd->dm_root;
+	gd->dm_root = NULL;
+	bootstage_start(BOOTSTATE_ID_ACCUM_DM_R, "dm_r");
+	ret = dm_init_and_scan(false);
+	bootstage_accum(BOOTSTATE_ID_ACCUM_DM_R);
+	if (ret)
+		return ret;
+
+#if defined(CONFIG_TIMER)
+	gd->timer = NULL;
+#endif
+	serial_init();
+
+	return 0;
+}
+#else
+static int spl_initr_dm(void)
+{
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_SPL_KERNEL_BOOT) && !defined(CONFIG_ARM64)
+static void boot_jump_linux(struct spl_image_info *spl_image)
+{
+	void (*kernel_entry)(int zero, int arch, ulong params);
+
+	printf("Jumping to %s(0x%08lx)\n", "Kernel",
+	       (ulong)spl_image->entry_point_os);
+	spl_cleanup_before_jump(spl_image);
+	kernel_entry = (void (*)(int, int, ulong))spl_image->entry_point_os;
+	kernel_entry(0, 0, (ulong)spl_image->fdt_addr);
+}
+#endif
 
 void board_init_r(gd_t *dummy1, ulong dummy2)
 {
@@ -365,7 +515,11 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	struct spl_image_info spl_image;
 
 	debug(">>spl:board_init_r()\n");
-	gd->bd = &bdata;
+
+	spl_initr_dm();
+
+	spl_set_bd();
+
 #ifdef CONFIG_SPL_OS_BOOT
 	dram_init_banksize();
 #endif
@@ -387,21 +541,39 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	timer_init();
 #endif
 
-#ifdef CONFIG_SPL_BOARD_INIT
+#if CONFIG_IS_ENABLED(BOARD_INIT)
 	spl_board_init();
 #endif
 
 	memset(&spl_image, '\0', sizeof(spl_image));
+
+#if CONFIG_IS_ENABLED(ATF)
+	/*
+	 * Bl32 ep is optional, initial it as an invalid value.
+	 * BL33 ep is mandatory, but initial it as a default value is better.
+	 */
+	spl_image.entry_point_bl32 = -1;
+	spl_image.entry_point_bl33 = CONFIG_SYS_TEXT_BASE;
+#endif
+
+#if CONFIG_IS_ENABLED(OPTEE)
+	/* default address */
+	spl_image.entry_point_os = CONFIG_SYS_TEXT_BASE;
+#endif
+
 #ifdef CONFIG_SYS_SPL_ARGS_ADDR
 	spl_image.arg = (void *)CONFIG_SYS_SPL_ARGS_ADDR;
 #endif
+	spl_image.boot_device = BOOT_DEVICE_NONE;
 	board_boot_order(spl_boot_list);
-
+	spl_next_stage(&spl_image);
 	if (boot_from_devices(&spl_image, spl_boot_list,
 			      ARRAY_SIZE(spl_boot_list))) {
 		puts("SPL: failed to boot from all boot devices\n");
 		hang();
 	}
+
+	spl_perform_fixups(&spl_image);
 
 #ifdef CONFIG_CPU_V7M
 	spl_image.entry_point |= 0x1;
@@ -409,14 +581,41 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	switch (spl_image.os) {
 	case IH_OS_U_BOOT:
 		debug("Jumping to U-Boot\n");
+		spl_cleanup_before_jump(&spl_image);
 		break;
-#ifdef CONFIG_SPL_OS_BOOT
+#if CONFIG_IS_ENABLED(ATF)
+	case IH_OS_ARM_TRUSTED_FIRMWARE:
+		printf("Jumping to %s(0x%08lx) via ARM Trusted Firmware(0x%08lx)\n",
+		       spl_image.next_stage == SPL_NEXT_STAGE_UBOOT ? "U-Boot" :
+		       (spl_image.next_stage == SPL_NEXT_STAGE_KERNEL ? "Kernel" : "Unknown"),
+		       (ulong)spl_image.entry_point_bl33,
+		       (ulong)spl_image.entry_point);
+		spl_invoke_atf(&spl_image);
+		break;
+#endif
+#if CONFIG_IS_ENABLED(OPTEE)
+	case IH_OS_OP_TEE:
+		printf("Jumping to %s(0x%08lx) via OP-TEE(0x%08lx)\n",
+		       spl_image.next_stage == SPL_NEXT_STAGE_UBOOT ? "U-Boot" :
+		       (spl_image.next_stage == SPL_NEXT_STAGE_KERNEL ? "Kernel" : "Unknown"),
+		       (ulong)spl_image.entry_point_os,
+		       (ulong)spl_image.entry_point);
+		spl_cleanup_before_jump(&spl_image);
+		spl_optee_entry(NULL, (void *)spl_image.entry_point_os,
+				(void *)spl_image.fdt_addr,
+				(void *)spl_image.entry_point);
+		break;
+#endif
 	case IH_OS_LINUX:
+#ifdef CONFIG_SPL_OS_BOOT
 		debug("Jumping to Linux\n");
 		spl_fixup_fdt();
 		spl_board_prepare_for_linux();
 		jump_to_image_linux(&spl_image);
+#elif defined(CONFIG_SPL_KERNEL_BOOT) && !defined(CONFIG_ARM64)
+		boot_jump_linux(&spl_image);
 #endif
+		break;
 	default:
 		debug("Unsupported OS image.. Jumping nevertheless..\n");
 	}
@@ -424,11 +623,6 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	debug("SPL malloc() used %#lx bytes (%ld KB)\n", gd->malloc_ptr,
 	      gd->malloc_ptr / 1024);
 #endif
-
-	if (CONFIG_IS_ENABLED(ATF_SUPPORT)) {
-		debug("loaded - jumping to U-Boot via ATF BL31.\n");
-		bl31_entry();
-	}
 
 	debug("loaded - jumping to U-Boot...\n");
 #ifdef CONFIG_BOOTSTAGE_STASH
@@ -440,6 +634,8 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
 	if (ret)
 		debug("Failed to stash bootstage: err=%d\n", ret);
 #endif
+
+	printf("Jumping to U-Boot(0x%08lx)\n", spl_image.entry_point);
 	spl_board_prepare_for_boot();
 	jump_to_image_no_args(&spl_image);
 }
@@ -509,4 +705,38 @@ ulong spl_relocate_stack_gd(void)
 #else
 	return 0;
 #endif
+}
+
+/* cleanup before jump to next stage */
+void spl_cleanup_before_jump(struct spl_image_info *spl_image)
+{
+	ulong us;
+
+	spl_board_prepare_for_jump(spl_image);
+
+	disable_interrupts();
+
+#ifdef CONFIG_ARM64
+	disable_serror();
+#else
+	disable_async_abort();
+#endif
+	/*
+	 * Turn off I-cache and invalidate it
+	 */
+	icache_disable();
+	invalidate_icache_all();
+
+	/*
+	 * Turn off D-cache
+	 * dcache_disable() in turn flushes the d-cache and disables MMU
+	 */
+	dcache_disable();
+	invalidate_dcache_all();
+
+	dsb();
+	isb();
+
+	us = (get_ticks() - gd->sys_start_tick) / 24UL;
+	printf("Total: %ld.%ld ms\n\n", us / 1000, us % 1000);
 }

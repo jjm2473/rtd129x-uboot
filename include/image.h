@@ -17,6 +17,7 @@
 #define __IMAGE_H__
 
 #include "compiler.h"
+#include <stdbool.h>
 #include <asm/byteorder.h>
 
 /* Define this to avoid #ifdefs later on */
@@ -29,6 +30,7 @@ struct lmb;
 #define IMAGE_ENABLE_FIT	1
 #define IMAGE_ENABLE_OF_LIBFDT	1
 #define CONFIG_FIT_VERBOSE	1 /* enable fit_format_{error,warning}() */
+#define CONFIG_FIT_ENABLE_RSASSA_PSS_SUPPORT 1
 #define CONFIG_FIT_ENABLE_SHA256_SUPPORT
 #define CONFIG_SHA1
 #define CONFIG_SHA256
@@ -53,7 +55,7 @@ struct lmb;
 
 #if IMAGE_ENABLE_FIT
 #include <hash.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <fdt_support.h>
 # ifdef CONFIG_SPL_BUILD
 #  ifdef CONFIG_SPL_CRC32_SUPPORT
@@ -152,6 +154,8 @@ enum {
 	IH_OS_OSE,			/* OSE		*/
 	IH_OS_PLAN9,			/* Plan 9	*/
 	IH_OS_OPENRTOS,		/* OpenRTOS	*/
+	IH_OS_ARM_TRUSTED_FIRMWARE,     /* ARM Trusted Firmware */
+	IH_OS_OP_TEE,			/* OP-TEE	*/
 
 	IH_OS_COUNT,
 };
@@ -189,6 +193,7 @@ enum {
 	IH_ARCH_ARC,			/* Synopsys DesignWare ARC */
 	IH_ARCH_X86_64,			/* AMD x86_64, Intel and Via */
 	IH_ARCH_XTENSA,			/* Xtensa	*/
+	IH_ARCH_RISCV,			/* RISC-V */
 
 	IH_ARCH_COUNT,
 };
@@ -269,6 +274,8 @@ enum {
 	IH_TYPE_VYBRIDIMAGE,	/* VYBRID .vyb Image */
 	IH_TYPE_TEE,            /* Trusted Execution Environment OS Image */
 	IH_TYPE_FIRMWARE_IVT,		/* Firmware Image with HABv4 IVT */
+	IH_TYPE_PMMC,            /* TI Power Management Micro-Controller Firmware */
+	IH_TYPE_RKNAND,			/* Rockchip NAND Boot Image	*/
 
 	IH_TYPE_COUNT,			/* Number of image types */
 };
@@ -286,6 +293,7 @@ enum {
 	IH_COMP_LZMA,			/* lzma  Compression Used	*/
 	IH_COMP_LZO,			/* lzo   Compression Used	*/
 	IH_COMP_LZ4,			/* lz4   Compression Used	*/
+	IH_COMP_ZIMAGE,			/* zImage Decompressed itself   */
 
 	IH_COMP_COUNT,
 };
@@ -390,6 +398,10 @@ typedef struct bootm_headers {
 
 #ifdef CONFIG_LMB
 	struct lmb	lmb;		/* for memory mgmt */
+#endif
+
+#ifdef CONFIG_FIT_ROLLBACK_PROTECT
+	u32 rollback_index;
 #endif
 } bootm_headers_t;
 
@@ -557,7 +569,6 @@ ulong genimg_get_kernel_addr_fit(char * const img_addr,
 ulong genimg_get_kernel_addr(char * const img_addr);
 int genimg_get_format(const void *img_addr);
 int genimg_has_config(bootm_headers_t *images);
-ulong genimg_get_image(ulong img_addr);
 
 int boot_get_fpga(int argc, char * const argv[], bootm_headers_t *images,
 		uint8_t arch, const ulong *ld_start, ulong * const ld_len);
@@ -593,6 +604,31 @@ int boot_get_setup_fit(bootm_headers_t *images, uint8_t arch,
 		       ulong *setup_start, ulong *setup_len);
 
 /**
+ * boot_get_fdt_fit() - load a DTB from a FIT file (applying overlays)
+ *
+ * This deals with all aspects of loading an DTB from a FIT.
+ * The correct base image based on configuration will be selected, and
+ * then any overlays specified will be applied (as present in fit_uname_configp).
+ *
+ * @param images	Boot images structure
+ * @param addr		Address of FIT in memory
+ * @param fit_unamep	On entry this is the requested image name
+ *			(e.g. "kernel@1") or NULL to use the default. On exit
+ *			points to the selected image name
+ * @param fit_uname_configp	On entry this is the requested configuration
+ *			name (e.g. "conf@1") or NULL to use the default. On
+ *			exit points to the selected configuration name.
+ * @param arch		Expected architecture (IH_ARCH_...)
+ * @param datap		Returns address of loaded image
+ * @param lenp		Returns length of loaded image
+ *
+ * @return node offset of base image, or -ve error code on error
+ */
+int boot_get_fdt_fit(bootm_headers_t *images, ulong addr,
+		   const char **fit_unamep, const char **fit_uname_configp,
+		   int arch, ulong *datap, ulong *lenp);
+
+/**
  * fit_image_load() - load an image from a FIT
  *
  * This deals with all aspects of loading an image from a FIT, including
@@ -625,6 +661,11 @@ int boot_get_setup_fit(bootm_headers_t *images, uint8_t arch,
 int fit_image_load(bootm_headers_t *images, ulong addr,
 		   const char **fit_unamep, const char **fit_uname_configp,
 		   int arch, int image_type, int bootstage_id,
+		   enum fit_load_op load_op, ulong *datap, ulong *lenp);
+
+int fit_image_load_index(bootm_headers_t *images, ulong addr,
+		   const char **fit_unamep, const char **fit_uname_configp,
+		   int arch, int image_type, int image_index, int bootstage_id,
 		   enum fit_load_op load_op, ulong *datap, ulong *lenp);
 
 #ifndef USE_HOSTCC
@@ -662,6 +703,11 @@ int boot_get_fdt(int flag, int argc, char * const argv[], uint8_t arch,
 		 bootm_headers_t *images,
 		 char **of_flat_tree, ulong *of_size);
 void boot_fdt_add_mem_rsv_regions(struct lmb *lmb, void *fdt_blob);
+#ifdef CONFIG_SYSMEM
+int boot_fdt_add_sysmem_rsv_regions(void *fdt_blob);
+#else
+static inline int boot_fdt_add_sysmem_rsv_regions(void *fdt_blob) { return 0; }
+#endif
 int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size);
 
 int boot_ramdisk_high(struct lmb *lmb, ulong rd_data, ulong rd_len,
@@ -675,6 +721,8 @@ int boot_get_kbd(struct lmb *lmb, bd_t **kbd);
 /*******************************************************************/
 /* Legacy format specific code (prefixed with image_) */
 /*******************************************************************/
+#define IMAGE_PARAM_INVAL	0xffffffff
+
 static inline uint32_t image_get_header_size(void)
 {
 	return (sizeof(image_header_t));
@@ -689,9 +737,17 @@ image_get_hdr_l(magic)		/* image_get_magic */
 image_get_hdr_l(hcrc)		/* image_get_hcrc */
 image_get_hdr_l(time)		/* image_get_time */
 image_get_hdr_l(size)		/* image_get_size */
+image_get_hdr_l(dcrc)		/* image_get_dcrc */
+#ifdef USE_HOSTCC
 image_get_hdr_l(load)		/* image_get_load */
 image_get_hdr_l(ep)		/* image_get_ep */
-image_get_hdr_l(dcrc)		/* image_get_dcrc */
+#elif defined(CONFIG_SPL_BUILD)
+image_get_hdr_l(load)		/* image_get_load */
+image_get_hdr_l(ep)		/* image_get_ep */
+#else
+uint32_t image_get_load(const image_header_t *hdr);
+uint32_t image_get_ep(const image_header_t *hdr);
+#endif
 
 #define image_get_hdr_b(f) \
 	static inline uint8_t image_get_##f(const image_header_t *hdr) \
@@ -861,29 +917,49 @@ int bootz_setup(ulong image, ulong *start, ulong *end);
 
 /* image node */
 #define FIT_DATA_PROP		"data"
+#define FIT_DATA_POSITION_PROP	"data-position"
 #define FIT_DATA_OFFSET_PROP	"data-offset"
 #define FIT_DATA_SIZE_PROP	"data-size"
 #define FIT_TIMESTAMP_PROP	"timestamp"
+#define FIT_TOTALSIZE_PROP	"totalsize"
+#define FIT_VERSION_PROP	"version"
 #define FIT_DESC_PROP		"description"
 #define FIT_ARCH_PROP		"arch"
 #define FIT_TYPE_PROP		"type"
 #define FIT_OS_PROP		"os"
 #define FIT_COMP_PROP		"compression"
+#define FIT_COMP_ADDR_PROP	"comp"
 #define FIT_ENTRY_PROP		"entry"
 #define FIT_LOAD_PROP		"load"
+#define FIT_PRE_LOAD_PROP	"preload"
+#define FIT_ROLLBACK_PROP	"rollback-index"
 
 /* configuration node */
 #define FIT_KERNEL_PROP		"kernel"
 #define FIT_RAMDISK_PROP	"ramdisk"
 #define FIT_FDT_PROP		"fdt"
+#define FIT_MULTI_PROP		"multi"
 #define FIT_LOADABLE_PROP	"loadables"
 #define FIT_DEFAULT_PROP	"default"
 #define FIT_SETUP_PROP		"setup"
 #define FIT_FPGA_PROP		"fpga"
+#define FIT_FIRMWARE_PROP	"firmware"
+#define FIT_STANDALONE_PROP	"standalone"
 
 #define FIT_MAX_HASH_LEN	HASH_MAX_DIGEST_SIZE
+#define FIT_MAX_SPL_IMAGE_SZ	SZ_2M
 
 #if IMAGE_ENABLE_FIT
+
+#ifndef IMAGE_ALIGN_SIZE
+#define IMAGE_ALIGN_SIZE	512
+#endif
+#define FIT_ALIGN(x)		(((x)+IMAGE_ALIGN_SIZE-1)&~(IMAGE_ALIGN_SIZE-1))
+
+/* fit rollback index file description magic */
+#define FIT_ROLLBACK_INDEX	0xf1de0001
+#define FIT_ROLLBACK_INDEX_SPL	0xf1de8002
+
 /* cmdline argument format parsing */
 int fit_parse_conf(const char *spec, ulong addr_curr,
 		ulong *addr, const char **conf_name);
@@ -931,24 +1007,36 @@ static inline const char *fit_get_name(const void *fit_hdr,
 
 int fit_get_desc(const void *fit, int noffset, char **desc);
 int fit_get_timestamp(const void *fit, int noffset, time_t *timestamp);
+int fit_get_totalsize(const void *fit, int *totalsize);
 
 int fit_image_get_node(const void *fit, const char *image_uname);
 int fit_image_get_os(const void *fit, int noffset, uint8_t *os);
 int fit_image_get_arch(const void *fit, int noffset, uint8_t *arch);
 int fit_image_get_type(const void *fit, int noffset, uint8_t *type);
 int fit_image_get_comp(const void *fit, int noffset, uint8_t *comp);
+bool fit_image_is_preload(const void *fit, int noffset);
 int fit_image_get_load(const void *fit, int noffset, ulong *load);
 int fit_image_get_entry(const void *fit, int noffset, ulong *entry);
+int fit_image_get_comp_addr(const void *fit, int noffset, ulong *comp);
+int fit_image_set_load(const void *fit, int noffset, ulong load);
+int fit_image_set_entry(const void *fit, int noffset, ulong entry);
 int fit_image_get_data(const void *fit, int noffset,
 				const void **data, size_t *size);
 int fit_image_get_data_offset(const void *fit, int noffset, int *data_offset);
+int fit_image_get_data_position(const void *fit, int noffset,
+				int *data_position);
 int fit_image_get_data_size(const void *fit, int noffset, int *data_size);
+int fit_image_get_rollback_index(const void *fit, int noffset, uint32_t *index);
 
 int fit_image_hash_get_algo(const void *fit, int noffset, char **algo);
 int fit_image_hash_get_value(const void *fit, int noffset, uint8_t **value,
 				int *value_len);
+int fit_image_check_hash(const void *fit, int noffset, const void *data,
+			 size_t size, char **err_msgp);
 
 int fit_set_timestamp(void *fit, int noffset, time_t timestamp);
+int fit_set_totalsize(void *fit, int noffset, int totalsize);
+int fit_set_version(void *fit, int noffset, int version);
 
 /**
  * fit_add_verification_data() - add verification data to FIT image nodes
@@ -974,9 +1062,13 @@ int fit_add_verification_data(const char *keydir, void *keydest, void *fit,
 			      const char *comment, int require_keys,
 			      const char *engine_id);
 
+int fit_image_verify_with_data(const void *fit, int image_noffset,
+			       const void *data, size_t size);
 int fit_image_verify(const void *fit, int noffset);
 int fit_config_verify(const void *fit, int conf_noffset);
 int fit_all_image_verify(const void *fit);
+int fit_board_verify_required_sigs(void);
+
 int fit_image_check_os(const void *fit, int noffset, uint8_t os);
 int fit_image_check_arch(const void *fit, int noffset, uint8_t arch);
 int fit_image_check_type(const void *fit, int noffset, uint8_t type);
@@ -985,6 +1077,11 @@ int fit_check_format(const void *fit);
 
 int fit_conf_find_compat(const void *fit, const void *fdt);
 int fit_conf_get_node(const void *fit, const char *conf_uname);
+
+/* __weak function */
+int fit_rollback_index_verify(const void *fit, uint32_t rollback_fd,
+			      uint32_t *fit_index, uint32_t *otp_index);
+int fit_read_otp_rollback_index(uint32_t fit_index, uint32_t *otp_index);
 
 /**
  * fit_conf_get_prop_node() - Get node refered to by a configuration
@@ -999,6 +1096,9 @@ int fit_conf_get_node(const void *fit, const char *conf_uname);
  */
 int fit_conf_get_prop_node(const void *fit, int noffset,
 		const char *prop_name);
+
+int fit_conf_get_prop_node_index(const void *fit, int noffset,
+		const char *prop_name, int index);
 
 void fit_conf_print(const void *fit, int noffset, const char *p);
 
@@ -1031,7 +1131,11 @@ void *image_get_host_blob(void);
 void image_set_host_blob(void *host_blob);
 # define gd_fdt_blob()		image_get_host_blob()
 #else
+#if !defined(CONFIG_SPL_BUILD) && defined(CONFIG_USING_KERNEL_DTB)
+# define gd_fdt_blob()		(gd->ufdt_blob)
+#else
 # define gd_fdt_blob()		(gd->fdt_blob)
+#endif
 #endif
 
 #ifdef CONFIG_FIT_BEST_MATCH
@@ -1048,6 +1152,7 @@ struct image_sign_info {
 	int node_offset;		/* Offset of signature node */
 	const char *name;		/* Algorithm name */
 	struct checksum_algo *checksum;	/* Checksum algorithm information */
+	struct padding_algo *padding;	/* Padding algorithm information */
 	struct crypto_algo *crypto;	/* Crypto algorithm information */
 	const void *fdt_blob;		/* FDT containing public keys */
 	int required_keynode;		/* Node offset of key to use: -1=any */
@@ -1133,6 +1238,13 @@ struct crypto_algo {
 		      uint8_t *sig, uint sig_len);
 };
 
+struct padding_algo {
+	const char *name;
+	int (*verify)(struct image_sign_info *info,
+		      uint8_t *pad, int pad_len,
+		      const uint8_t *hash, int hash_len);
+};
+
 /**
  * image_get_checksum_algo() - Look up a checksum algorithm
  *
@@ -1148,6 +1260,14 @@ struct checksum_algo *image_get_checksum_algo(const char *full_name);
  * @return pointer to algorithm information, or NULL if not found
  */
 struct crypto_algo *image_get_crypto_algo(const char *full_name);
+
+/**
+ * image_get_padding_algo() - Look up a padding algorithm
+ *
+ * @param name		Name of padding algorithm
+ * @return pointer to algorithm information, or NULL if not found
+ */
+struct padding_algo *image_get_padding_algo(const char *name);
 
 /**
  * fit_image_verify_required_sigs() - Verify signatures marked as 'required'
@@ -1228,16 +1348,53 @@ static inline int fit_image_check_target_arch(const void *fdt, int node)
 
 #if defined(CONFIG_ANDROID_BOOT_IMAGE)
 struct andr_img_hdr;
+u32 android_bcb_msg_sector_offset(void);
+u32 android_image_major_version(void);
 int android_image_check_header(const struct andr_img_hdr *hdr);
 int android_image_get_kernel(const struct andr_img_hdr *hdr, int verify,
 			     ulong *os_data, ulong *os_len);
 int android_image_get_ramdisk(const struct andr_img_hdr *hdr,
 			      ulong *rd_data, ulong *rd_len);
+int android_image_get_fdt(const struct andr_img_hdr *hdr,
+			      ulong *rd_data);
+u32 android_image_get_comp(const struct andr_img_hdr *hdr);
 ulong android_image_get_end(const struct andr_img_hdr *hdr);
 ulong android_image_get_kload(const struct andr_img_hdr *hdr);
 void android_print_contents(const struct andr_img_hdr *hdr);
 
+void android_image_set_decomp(struct andr_img_hdr *hdr, int comp);
+int android_image_parse_comp(struct andr_img_hdr *hdr, ulong *load_addr);
+int android_image_memcpy_separate(struct andr_img_hdr *hdr, ulong *load_address);
+
+struct andr_img_hdr *populate_andr_img_hdr(struct blk_desc *dev_desc,
+					   disk_partition_t *part_boot);
+
+/** android_image_load - Load an Android Image from storage.
+ *
+ * Load an Android Image based on the header size in the storage.
+ * Return the final load address, which could be a different address
+ * of argument load_address, if the Kernel Image is compressed. In case
+ * of error reading the image or if the image size needed to be read
+ * from disk is bigger than the passed |max_size| a negative number
+ * is returned.
+ *
+ * @dev_desc:		The device where to read the image from
+ * @part_info:		The partition in |dev_desc| where to read the image from
+ * @load_address:	The address where the image will be loaded
+ * @max_size:		The maximum loaded size, in bytes
+ * @return the final load address or a negative number in case of error.
+ */
+long android_image_load(struct blk_desc *dev_desc,
+			const disk_partition_t *part_info,
+			unsigned long load_address,
+			unsigned long max_size);
+
+int android_image_load_by_partname(struct blk_desc *dev_desc,
+				   const char *boot_partname,
+				   unsigned long *load_address);
 #endif /* CONFIG_ANDROID_BOOT_IMAGE */
+
+int bootm_parse_comp(const unsigned char *hdr);
 
 /**
  * board_fit_config_name_match() - Check for a matching board name
@@ -1263,16 +1420,36 @@ int board_fit_config_name_match(const char *name);
  * into the FIT creation (i.e. the binary blobs would have been pre-processed
  * before being added to the FIT image).
  *
+ * @fit: fit blob
  * @image: pointer to the image start pointer
+ * @load_addr: load address pointer to image(Uncompressed)
+ * @src_addr: source address pointer to image(Compressed maybe)
  * @size: pointer to the image size
+ * @spec: special data. SPL: struct spl_load_info info, U-Boot: NULL.
+ *
  * @return no return value (failure should be handled internally)
  */
-void board_fit_image_post_process(void **p_image, size_t *p_size);
+void board_fit_image_post_process(void *fit, int node, ulong *load_addr,
+				  ulong **src_addr, size_t *size, void *spec);
+
 #endif /* CONFIG_SPL_FIT_IMAGE_POST_PROCESS */
 
 #define FDT_ERROR	((ulong)(-1))
 
 ulong fdt_getprop_u32(const void *fdt, int node, const char *prop);
+
+/**
+ * fit_find_config_node() - Find the node for the best DTB in a FIT image
+ *
+ * A FIT image contains one or more DTBs. This function parses the
+ * configurations described in the FIT images and returns the node of
+ * the first matching DTB. To check if a DTB matches a board, this function
+ * calls board_fit_config_name_match(). If no matching DTB is found, it returns
+ * the node described by the default configuration if it exists.
+ *
+ * @fdt: pointer to flat device tree
+ * @return the node if found, -ve otherwise
+ */
 int fit_find_config_node(const void *fdt);
 
 /**

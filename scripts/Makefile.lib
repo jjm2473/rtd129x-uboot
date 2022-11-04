@@ -175,7 +175,7 @@ u_boot_dtsi_options = $(wildcard $(dir $<)$(basename $(notdir $<))-u-boot.dtsi) 
 # $(warning u_boot_dtsi_options: $(u_boot_dtsi_options))
 
 # We use the first match
-u_boot_dtsi = $(firstword $(u_boot_dtsi_options))
+u_boot_dtsi = $(notdir $(firstword $(u_boot_dtsi_options)))
 
 # Modified for U-Boot
 dtc_cpp_flags  = -Wp,-MD,$(depfile).pre.tmp -nostdinc                    \
@@ -308,9 +308,8 @@ quiet_cmd_dtc = DTC     $@
 # Modified for U-Boot
 # Bring in any U-Boot-specific include at the end of the file
 cmd_dtc = mkdir -p $(dir ${dtc-tmp}) ; \
-	cat $< $(if $(u_boot_dtsi),\
-		| sed "$$ a\#include \"$(u_boot_dtsi)\"") | \
-		$(CPP) $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) - ; \
+	(cat $<; $(if $(u_boot_dtsi),echo '$(pound)include "$(u_boot_dtsi)"')) > $(pre-tmp); \
+	$(CPP) $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $(pre-tmp) ; \
 	$(DTC) -O dtb -o $@ -b 0 \
 		-i $(dir $<) $(DTC_FLAGS) \
 		-d $(depfile).dtc.tmp $(dtc-tmp) ; \
@@ -319,7 +318,25 @@ cmd_dtc = mkdir -p $(dir ${dtc-tmp}) ; \
 $(obj)/%.dtb: $(src)/%.dts FORCE
 	$(call if_changed_dep,dtc)
 
+pre-tmp = $(subst $(comma),_,$(dot-target).pre.tmp)
 dtc-tmp = $(subst $(comma),_,$(dot-target).dts.tmp)
+
+# DTCO
+# ---------------------------------------------------------------------------
+
+quiet_cmd_dtco = DTCO    $@
+# Rule for objects only; does not put specific u-boot include at the end
+# No generation of assembly file either
+# Modified for U-Boot
+cmd_dtco = mkdir -p $(dir ${dtc-tmp}) ; \
+	$(CPP) $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) - ; \
+	$(DTC) -@ -O dtb -o $@ -b 0 \
+		-i $(dir $<) $(DTC_FLAGS) \
+		-d $(depfile).dtc.tmp $(dtc-tmp) ; \
+	cat $(depfile).pre.tmp $(depfile).dtc.tmp > $(depfile)
+
+$(obj)/%.dtbo: $(src)/%.dts FORCE
+	$(call if_changed_dep,dtco)
 
 # Fonts
 # ---------------------------------------------------------------------------
@@ -374,8 +391,6 @@ cmd_efi_ld = $(LD) -nostdlib -znocombreloc -T $(EFI_LDS_PATH) -shared \
 		-Bsymbolic $^ -o $@
 
 EFI_LDS_PATH = $(srctree)/arch/$(ARCH)/lib/$(EFI_LDS)
-
-$(obj)/helloworld.so: $(EFI_LDS_PATH)
 
 $(obj)/helloworld.so: $(obj)/helloworld.o arch/$(ARCH)/lib/$(EFI_CRT0) \
 		arch/$(ARCH)/lib/$(EFI_RELOC)

@@ -8,6 +8,7 @@
 #ifndef _ENVIRONMENT_H_
 #define _ENVIRONMENT_H_
 
+#include <stdbool.h>
 #include <linux/kconfig.h>
 
 /**************************************************************************
@@ -143,11 +144,22 @@ extern unsigned long nand_env_oob_offset;
 # define ENV_HEADER_SIZE	(sizeof(uint32_t))
 #endif
 
+/* Select the MAX from CONFIG_ENV_{,NAND,NOR}_SIZE */
+#if defined(CONFIG_ENV_NAND_SIZE) && (CONFIG_ENV_SIZE < CONFIG_ENV_NAND_SIZE)
+#define ENV_SIZE_VAL	CONFIG_ENV_NAND_SIZE
+#else
+#define ENV_SIZE_VAL	CONFIG_ENV_SIZE
+#endif
+#if defined(CONFIG_ENV_NOR_SIZE) && (ENV_SIZE_VAL < CONFIG_ENV_NOR_SIZE)
+#undef ENV_SIZE_VAL
+#define ENV_SIZE_VAL	CONFIG_ENV_NOR_SIZE
+#endif
+
 #ifdef CONFIG_ENV_AES
 /* Make sure the payload is multiple of AES block size */
-#define ENV_SIZE ((CONFIG_ENV_SIZE - ENV_HEADER_SIZE) & ~(16 - 1))
+#define ENV_SIZE ((ENV_SIZE_VAL - ENV_HEADER_SIZE) & ~(16 - 1))
 #else
-#define ENV_SIZE (CONFIG_ENV_SIZE - ENV_HEADER_SIZE)
+#define ENV_SIZE (ENV_SIZE_VAL - ENV_HEADER_SIZE)
 #endif
 
 typedef struct environment_s {
@@ -198,7 +210,6 @@ enum env_valid {
 };
 
 enum env_location {
-	ENVL_DATAFLASH,
 	ENVL_EEPROM,
 	ENVL_EXT4,
 	ENVL_FAT,
@@ -211,6 +222,7 @@ enum env_location {
 	ENVL_SPI_FLASH,
 	ENVL_UBI,
 	ENVL_NOWHERE,
+	ENVL_BLK,
 
 	ENVL_COUNT,
 	ENVL_UNKNOWN,
@@ -288,6 +300,9 @@ char *env_get_default(const char *name);
 
 /* [re]set to the default environment */
 void set_default_env(const char *s);
+
+/* [re]set to the board environment */
+int set_board_env(const char *vars, int size, int flags, bool ready);
 
 /* [re]set individual variables to their value in the default environment */
 int set_default_vars(int nvars, char * const vars[]);

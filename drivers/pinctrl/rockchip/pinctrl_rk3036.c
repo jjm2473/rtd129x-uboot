@@ -10,10 +10,10 @@
 #include <errno.h>
 #include <syscon.h>
 #include <asm/io.h>
-#include <asm/arch/clock.h>
-#include <asm/arch/grf_rk3036.h>
-#include <asm/arch/hardware.h>
-#include <asm/arch/periph.h>
+#include <asm/arch-rockchip/clock.h>
+#include <asm/arch-rockchip/grf_rk3036.h>
+#include <asm/arch-rockchip/hardware.h>
+#include <asm/arch-rockchip/periph.h>
 #include <dm/pinctrl.h>
 
 DECLARE_GLOBAL_DATA_PTR;

@@ -79,6 +79,17 @@ lr	.req	x30
 .endm
 
 /*
+ * Branch if current processor is a Cortex-A35 core.
+ */
+.macro	branch_if_a35_core, xreg, a35_label
+	mrs	\xreg, midr_el1
+	lsr	\xreg, \xreg, #4
+	and	\xreg, \xreg, #0x00000FFF
+	cmp	\xreg, #0xD04		/* Cortex-A35 MPCore processor. */
+	b.eq	\a35_label
+.endm
+
+/*
  * Branch if current processor is a Cortex-A57 core.
  */
 .macro	branch_if_a57_core, xreg, a57_label
@@ -131,6 +142,7 @@ lr	.req	x30
 	/* NOTE: MPIDR handling will be erroneous on multi-cluster machines */
 	mrs	\xreg1, mpidr_el1
 	lsr	\xreg2, \xreg1, #32
+	lsl	\xreg2, \xreg2, #32
 	lsl	\xreg1, \xreg1, #40
 	lsr	\xreg1, \xreg1, #40
 	orr	\xreg1, \xreg1, \xreg2

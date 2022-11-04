@@ -11,17 +11,25 @@ config USB_FUNCTION_FASTBOOT
 	help
 	  This enables the USB part of the fastboot gadget.
 
+config UDP_FUNCTION_FASTBOOT
+	select NET
+	bool "Enable fastboot protocol over UDP"
+	help
+	  This enables the fastboot protocol over UDP.
+
 config CMD_FASTBOOT
 	bool "Enable FASTBOOT command"
+	depends on USB_FUNCTION_FASTBOOT || UDP_FUNCTION_FASTBOOT
 	help
 	  This enables the command "fastboot" which enables the Android
-	  fastboot mode for the platform's USB device. Fastboot is a USB
-	  protocol for downloading images, flashing and device control
-	  used on Android devices.
+	  fastboot mode for the platform. Fastboot is a protocol for
+	  downloading images, flashing and device control used on
+	  Android devices. Fastboot requires either network stack
+	  enabled or support for acting as a USB device.
 
 	  See doc/README.android-fastboot for more information.
 
-if USB_FUNCTION_FASTBOOT
+if USB_FUNCTION_FASTBOOT || UDP_FUNCTION_FASTBOOT
 
 config FASTBOOT_BUF_ADDR
 	hex "Define FASTBOOT buffer address"
@@ -29,8 +37,8 @@ config FASTBOOT_BUF_ADDR
 	default 0x81000000 if ARCH_OMAP2PLUS
 	default 0x42000000 if ARCH_SUNXI && !MACH_SUN9I
 	default 0x22000000 if ARCH_SUNXI && MACH_SUN9I
-	default 0x60800800 if ROCKCHIP_RK3036 || ROCKCHIP_RK3188 || \
-				ROCKCHIP_RK322X
+	default 0x60800800 if ROCKCHIP_RK3036 || ROCKCHIP_RK3066 || \
+				ROCKCHIP_RK3188 || ROCKCHIP_RK322X
 	default 0x800800 if ROCKCHIP_RK3288 || ROCKCHIP_RK3329 || \
 				ROCKCHIP_RK3399
 	default 0x280000 if ROCKCHIP_RK3368
@@ -74,29 +82,21 @@ config FASTBOOT_FLASH_MMC_DEV
 	  regarding the non-volatile storage device. Define this to
 	  the eMMC device that fastboot should use to store the image.
 
-config FASTBOOT_GPT_NAME
-	string "Target name for updating GPT"
-	depends on FASTBOOT_FLASH
-	default "gpt"
+config FASTBOOT_OEM_UNLOCK
+	bool "Enable FASTBOOT OEM UNLOCK command"
+	depends on ANDROID_KEYMASTER_CA
 	help
-	  The fastboot "flash" command supports writing the downloaded
-	  image to the Protective MBR and the Primary GUID Partition
-	  Table. (Additionally, this downloaded image is post-processed
-	  to generate and write the Backup GUID Partition Table.)
-	  This occurs when the specified "partition name" on the
-	  "fastboot flash" command line matches the value defined here.
-	  The default target name for updating GPT is "gpt".
+	  This enables the command "fastboot oem unlock" the fastboot
+	  oem unlock command requires tee security storage to store
+	  unlock status. oem unlock status attach to bootargs on boot.
 
-config FASTBOOT_MBR_NAME
-	string "Target name for updating MBR"
-	depends on FASTBOOT_FLASH
-	default "mbr"
+config RK_AVB_LIBAVB_ENABLE_ATH_UNLOCK
+	bool "AVB Authenticated unlock function"
+	depends on ANDROID_AVB
 	help
-	  The fastboot "flash" command allows to write the downloaded image
-	  to the Master Boot Record. This occurs when the "partition name"
-	  specified on the "fastboot flash" command line matches the value
-	  defined here. The default target name for updating MBR is "mbr".
+	  Enabled authenticated unlock function can prevent lock state
+	  from invalid unlock cmd.
 
-endif # USB_FUNCTION_FASTBOOT
+endif # USB_FUNCTION_FASTBOOT || UDP_FUNCTION_FASTBOOT
 
 endif # FASTBOOT

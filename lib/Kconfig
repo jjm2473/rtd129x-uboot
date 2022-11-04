@@ -35,6 +35,12 @@ config SYS_HZ
 	  get_timer() must operate in milliseconds and this option must be
 	  set to 1000.
 
+config SYS_STACK_SIZE
+	hex
+	default 0x200000
+	help
+	 The system stack size.
+
 config USE_TINY_PRINTF
 	bool "Enable tiny printf() version"
 	help
@@ -44,6 +50,16 @@ config USE_TINY_PRINTF
 	  reduces the code size by about 2.5KiB on armv7.
 
 	  The supported format specifiers are %c, %s, %u/%d and %x.
+
+config PANIC_HANG
+	bool "Do not reset the system on fatal error"
+	help
+	  Define this option to stop the system in case of a fatal error,
+	  so that you have to reset it manually. This is probably NOT a good
+	  idea for an embedded system where you want the system to reboot
+	  automatically as fast as possible, but it may be useful during
+	  development since you can try to debug the conditions that lead to
+	  the situation.
 
 config REGEX
 	bool "Enable regular expression support"
@@ -61,6 +77,7 @@ config LIB_RAND
 
 config SPL_TINY_MEMSET
 	bool "Use a very small memset() in SPL"
+	depends on SPL
 	help
 	  The faster memset() is the arch-specific one (if available) enabled
 	  by CONFIG_USE_ARCH_MEMSET. If that is not enabled, we can still get
@@ -79,6 +96,21 @@ config TPL_TINY_MEMSET
 
 config RBTREE
 	bool
+
+config BITREVERSE
+	bool
+
+config SYSMEM
+	bool "System memory management"
+	default y
+	help
+	  This enables support for system permanent memory management.
+
+config BIDRAM
+	bool "GD board bi_dram[] memory management"
+	default y
+	help
+	  This enables support for GD board bi_dram[] memory management.
 
 source lib/dhry/Kconfig
 
@@ -108,6 +140,20 @@ config TPM
 
 endmenu
 
+menu "Boot Configuration"
+
+config XBC
+	bool "Boot Configuration support"
+	depends on ANDROID_BOOT_IMAGE
+	default n
+	help
+	  This enables support of Boot Configuration which can be used
+	  to pass boot configuration parameters to user space. These
+	  parameters will show up in /proc/bootconfig similar to the kernel
+	  parameters that show up in /proc/cmdline
+
+endmenu
+
 menu "Hashing Support"
 
 config SHA1
@@ -124,6 +170,14 @@ config SHA256
 	  This option enables support of hashing using SHA256 algorithm.
 	  The hash is calculated in software.
 	  The SHA256 algorithm produces a 256-bit (32-byte) hash value
+	  (digest).
+
+config SHA512
+	bool "Enable SHA512 support"
+	help
+	  This option enables support of hashing using SHA512 algorithm.
+	  The hash is calculated in software.
+	  The SHA512 algorithm produces a 512-bit (64-byte) hash value
 	  (digest).
 
 config SHA_HW_ACCEL
@@ -144,6 +198,9 @@ config SHA_PROG_HW_ACCEL
 	  is performed in hardware.
 
 config MD5
+	bool
+
+config CRC32C
 	bool
 
 endmenu
@@ -172,10 +229,35 @@ config LZMA
 	  ratio and fairly fast decompression speed. See also
 	  CONFIG_CMD_LZMADEC which provides a decode command.
 
+config SPL_LZMA
+	bool "Enable LZMA decompression support in SPL"
+	depends on SPL
+	help
+	  This enables support for LZMA (Lempel-Ziv-Markov chain algorithm),
+	  a dictionary compression algorithm that provides a high compression
+	  ratio and fairly fast decompression speed. See also
+
 config LZO
 	bool "Enable LZO decompression support"
 	help
 	  This enables support for LZO compression algorithm.r
+
+config SPL_LZO
+	bool "Enable LZO decompression support in SPL"
+	help
+	  This enables support for LZO compression algorithm in the SPL.
+
+config SPL_GZIP
+	bool "Enable gzip decompression support for SPL build"
+	select SPL_ZLIB
+	help
+	  This enables support for GZIP compression altorithm for SPL boot.
+
+config SPL_ZLIB
+	bool
+	help
+	  This enables compression lib for SPL boot.
+
 endmenu
 
 config ERRNO_STR
@@ -185,6 +267,11 @@ config ERRNO_STR
 	  corresponding text message:
 	  - if errno is null or positive number - a pointer to "Success" message
 	  - if errno is negative - a pointer to errno related message
+
+config HEXDUMP
+	bool "Enable hexdump"
+	help
+	  This enables functions for printing dumps of binary data.
 
 config OF_LIBFDT
 	bool "Enable the FDT library"
@@ -204,6 +291,16 @@ config OF_LIBFDT_OVERLAY
 config SPL_OF_LIBFDT
 	bool "Enable the FDT library for SPL"
 	default y if SPL_OF_CONTROL
+	help
+	  This enables the FDT library (libfdt). It provides functions for
+	  accessing binary device tree images in memory, such as adding and
+	  removing nodes and properties, scanning through the tree and finding
+	  particular compatible nodes. The library operates on a flattened
+	  version of the device tree.
+
+config TPL_OF_LIBFDT
+	bool "Enable the FDT library for TPL"
+	default y if TPL_OF_CONTROL
 	help
 	  This enables the FDT library (libfdt). It provides functions for
 	  accessing binary device tree images in memory, such as adding and
@@ -251,9 +348,21 @@ config SMBIOS_PRODUCT_NAME
 	  The product name to store in SMBIOS structures.
 	  Change this to override the default one (CONFIG_SYS_BOARD).
 
+config LIB_RATIONAL
+	bool "enable continued fraction calculation routines"
+
+config SPL_LIB_RATIONAL
+	bool "enable continued fraction calculation routines for SPL"
+	depends on SPL
+
 endmenu
 
 source lib/efi/Kconfig
 source lib/efi_loader/Kconfig
-
+source lib/avb/libavb/Kconfig
+source lib/avb/libavb_ab/Kconfig
+source lib/avb/libavb_atx/Kconfig
+source lib/avb/libavb_user/Kconfig
+source lib/avb/rk_avb_user/Kconfig
+source lib/optee_clientApi/Kconfig
 endmenu

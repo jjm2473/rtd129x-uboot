@@ -7,9 +7,28 @@
 #include <common.h>
 #include <dm.h>
 #include <mmc.h>
+#include <nand.h>
 #include <spl.h>
 
-#if CONFIG_IS_ENABLED(OF_CONTROL)
+#if CONFIG_IS_ENABLED(OF_CONTROL) && ! CONFIG_IS_ENABLED(OF_PLATDATA)
+/**
+ * spl_node_to_boot_device() - maps from a DT-node to a SPL boot device
+ * @node:	of_offset of the node
+ *
+ * The SPL framework uses BOOT_DEVICE_... constants to identify its boot
+ * sources.  These may take on a device-specific meaning, depending on
+ * what nodes are enabled in a DTS (e.g. BOOT_DEVICE_MMC1 may refer to
+ * different controllers/block-devices, depending on which SD/MMC controllers
+ * are enabled in any given DTS).  This function maps from a DT-node back
+ * onto a BOOT_DEVICE_... constant, considering the currently active devices.
+ *
+ * Returns
+ *   -ENOENT, if no device matching the node could be found
+ *   -ENOSYS, if the device matching the node can not be mapped onto a
+ *            SPL boot device (e.g. the third MMC device)
+ *   -1, for unspecified failures
+ *   a positive integer (from the BOOT_DEVICE_... family) on succes.
+ */
 static int spl_node_to_boot_device(int node)
 {
 	struct udevice *parent;
@@ -52,9 +71,65 @@ static int spl_node_to_boot_device(int node)
 	 * soon.
 	 */
 	if (!uclass_get_device_by_of_offset(UCLASS_SPI_FLASH, node, &parent))
+#ifndef CONFIG_SPL_MTD_SUPPORT
 		return BOOT_DEVICE_SPI;
+#else
+		return BOOT_DEVICE_MTD_BLK_SPI_NOR;
+
+	if (!uclass_get_device_by_of_offset(UCLASS_MTD, node, &parent)) {
+		struct udevice *dev;
+		struct blk_desc *desc = NULL;
+
+		for (device_find_first_child(parent, &dev);
+		     dev;
+		     device_find_next_child(&dev)) {
+			if (device_get_uclass_id(dev) == UCLASS_BLK) {
+				desc = dev_get_uclass_platdata(dev);
+				break;
+			}
+		}
+
+		if (!desc)
+			return -ENOENT;
+
+		switch (desc->devnum) {
+		case 0:
+			return BOOT_DEVICE_MTD_BLK_NAND;
+		case 1:
+			return BOOT_DEVICE_MTD_BLK_SPI_NAND;
+		default:
+			return -ENOSYS;
+		}
+	}
+#endif
+
+	/*
+	 * This should eventually move into the SPL code, once SPL becomes
+	 * aware of the block-device layer.  Until then (and to avoid unneeded
+	 * delays in getting this feature out, it lives at the board-level).
+	 */
+	if (!uclass_get_device_by_of_offset(UCLASS_RKNAND, node, &parent))
+		return BOOT_DEVICE_RKNAND;
 
 	return -1;
+}
+
+/**
+ * board_spl_was_booted_from() - retrieves the of-path the SPL was loaded from
+ *
+ * To support a 'same-as-spl' specification in the search-order for the next
+ * stage, we need a SoC- or board-specific way to handshake with what 'came
+ * before us' (either a BROM or TPL stage) and map the info retrieved onto
+ * a OF path.
+ *
+ * Returns
+ *   NULL, on failure or if the device could not be identified
+ *   a of_path (a string), on success
+ */
+__weak const char *board_spl_was_booted_from(void)
+{
+	debug("%s: no support for 'same-as-spl' for this board\n", __func__);
+	return NULL;
 }
 
 void board_boot_order(u32 *spl_boot_list)
@@ -78,8 +153,17 @@ void board_boot_order(u32 *spl_boot_list)
 	     (conf = fdt_stringlist_get(blob, chosen_node,
 					"u-boot,spl-boot-order", elem, NULL));
 	     elem++) {
+		const char *alias;
+
+		/* Handle the case of 'same device the SPL was loaded from' */
+		if (strncmp(conf, "same-as-spl", 11) == 0) {
+			conf = board_spl_was_booted_from();
+			if (!conf)
+				continue;
+		}
+
 		/* First check if the list element is an alias */
-		const char *alias = fdt_get_alias(blob, conf);
+		alias = fdt_get_alias(blob, conf);
 		if (alias)
 			conf = alias;
 

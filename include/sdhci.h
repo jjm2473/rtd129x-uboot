@@ -64,6 +64,7 @@
 #define  SDHCI_CARD_STATE_STABLE	BIT(17)
 #define  SDHCI_CARD_DETECT_PIN_LEVEL	BIT(18)
 #define  SDHCI_WRITE_PROTECT	BIT(19)
+#define SDHCI_DATA_0_LVL	BIT(20)
 
 #define SDHCI_HOST_CONTROL	0x28
 #define  SDHCI_CTRL_LED		BIT(0)
@@ -146,6 +147,23 @@
 #define SDHCI_ACMD12_ERR	0x3C
 
 /* 3E-3F reserved */
+#define SDHCI_HOST_CONTROL2		0x3E
+#define SDHCI_CTRL_UHS_MASK		0x0007
+#define SDHCI_CTRL_UHS_SDR12		0x0000
+#define SDHCI_CTRL_UHS_SDR25		0x0001
+#define SDHCI_CTRL_UHS_SDR50		0x0002
+#define SDHCI_CTRL_UHS_SDR104		0x0003
+#define SDHCI_CTRL_UHS_DDR50		0x0004
+#define SDHCI_CTRL_HS400		0x0005
+#define SDHCI_CTRL_VDD_180		0x0008
+#define SDHCI_CTRL_DRV_TYPE_MASK	0x0030
+#define SDHCI_CTRL_DRV_TYPE_B		0x0000
+#define SDHCI_CTRL_DRV_TYPE_A		0x0010
+#define SDHCI_CTRL_DRV_TYPE_C		0x0020
+#define SDHCI_CTRL_DRV_TYPE_D		0x0030
+#define SDHCI_CTRL_EXEC_TUNING		0x0040
+#define SDHCI_CTRL_TUNED_CLK		0x0080
+#define SDHCI_CTRL_PRESET_VAL_ENABLE	0x8000
 
 #define SDHCI_CAPABILITIES	0x40
 #define  SDHCI_TIMEOUT_CLK_MASK	0x0000003F
@@ -236,7 +254,8 @@ struct sdhci_ops {
 	int	(*get_cd)(struct sdhci_host *host);
 	void	(*set_control_reg)(struct sdhci_host *host);
 	void	(*set_ios_post)(struct sdhci_host *host);
-	void	(*set_clock)(struct sdhci_host *host, u32 div);
+	int	(*set_clock)(struct sdhci_host *host, unsigned int clock);
+	void	(*set_clock_ext)(struct sdhci_host *host, u32 div);
 };
 
 struct sdhci_host {
@@ -260,6 +279,8 @@ struct sdhci_host {
 
 	struct mmc_config cfg;
 };
+
+int sdhci_set_clock(struct sdhci_host *host, unsigned int clock);
 
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
 

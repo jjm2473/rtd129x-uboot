@@ -15,7 +15,7 @@ OUTPUT_ARCH(arm)
 ENTRY(_start)
 SECTIONS
 {
-#ifndef CONFIG_CMDLINE
+#if !defined(CONFIG_CMDLINE) && !defined(CONFIG_U_BOOT_CMD_ALWAYS)
 	/DISCARD/ : { *(.u_boot_list_2_cmd_*) }
 #endif
 #if defined(CONFIG_ARMV7_SECURE_BASE) && defined(CONFIG_ARMV7_NONSEC)
@@ -135,6 +135,23 @@ SECTIONS
 		KEEP(*(SORT(.u_boot_list*)));
 	}
 
+	/*
+	 * Stack unwinding tables
+	 */
+	. = ALIGN(8);
+	/* .ARM.exidx is sorted, so has to go in its own output section. */
+	.ARM.exidx : {
+		__exidx_start = .;
+		*(.ARM.exidx*)
+		__exidx_end = .;
+	}
+
+	.ARM.extab : {
+		__extab_start = .;
+		*(.ARM.extab*)
+		__extab_end = .;
+	}
+
 	. = ALIGN(4);
 
 	.__efi_runtime_start : {
@@ -165,7 +182,7 @@ SECTIONS
 		*(.__efi_runtime_rel_stop)
 	}
 
-	. = ALIGN(4);
+	. = ALIGN(8);
 
 	.image_copy_end :
 	{
@@ -188,6 +205,7 @@ SECTIONS
 
 	.end :
 	{
+		. = ALIGN(8);
 		*(.__end)
 	}
 

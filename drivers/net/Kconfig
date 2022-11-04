@@ -10,6 +10,25 @@ config DM_ETH
 	  This is currently implemented in net/eth.c
 	  Look in include/net.h for details.
 
+config DM_MDIO
+	bool "Enable Driver Model for MDIO devices"
+	depends on DM_ETH && PHYLIB
+	help
+	  Enable driver model for MDIO devices
+
+	  Adds UCLASS_MDIO DM class supporting MDIO buses that are probed as
+	  stand-alone devices.  Useful in particular for systems that support
+	  DM_ETH and have a stand-alone MDIO hardware block shared by multiple
+	  Ethernet interfaces.
+	  This is currently implemented in net/mdio-uclass.c
+	  Look in include/miiphy.h for details.
+
+config DM_ETH_PHY
+	bool "Enable Driver Model for Ethernet Generic PHY drivers"
+	depends on DM
+	help
+	  Enable driver model for Ethernet Generic PHY .
+
 menuconfig NETDEVICES
 	bool "Network device support"
 	depends on NET
@@ -81,6 +100,15 @@ config DWC_ETH_QOS
 	  clocking/reset structure, and feature list. This driver currently
 	  supports the specific configuration used in NVIDIA's Tegra186 chip,
 	  but should be extensible to other combinations quite easily.
+
+config DWC_ETH_QOS_FULL
+	bool "Synopsys DWC Ethernet QOS full vendor support"
+	depends on DWC_ETH_QOS
+	default y
+	help
+	  Select this to supports the Synopsys Designware Ethernet QOS (Quality
+	  Of Service) IP block for all chips, default is Y, if select it N, only
+	  support rockchip's chips.
 
 config E1000
 	bool "Intel PRO/1000 Gigabit Ethernet support"
@@ -257,7 +285,7 @@ config PIC32_ETH
 
 config GMAC_ROCKCHIP
 	bool "Rockchip Synopsys Designware Ethernet MAC"
-	depends on DM_ETH && ETH_DESIGNWARE
+	depends on DM_ETH && (ETH_DESIGNWARE || DWC_ETH_QOS)
 	help
 	  This driver provides Rockchip SoCs network support based on the
 	  Synopsys Designware driver.
@@ -272,7 +300,7 @@ config RENESAS_RAVB
 
 config MPC8XX_FEC
 	bool "Fast Ethernet Controller on MPC8XX"
-	depends on 8xx
+	depends on MPC8xx
 	select MII
 	help
 	  This driver implements support for the Fast Ethernet Controller

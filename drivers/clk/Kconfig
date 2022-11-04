@@ -12,7 +12,7 @@ config CLK
 
 config SPL_CLK
 	bool "Enable clock support in SPL"
-	depends on CLK && SPL_DM
+	depends on CLK && SPL && SPL_DM
 	help
 	  The clock subsystem adds a small amount of overhead to the image.
 	  If this is acceptable and you have a need to use clock drivers in
@@ -61,10 +61,27 @@ config CLK_ZYNQMP
 	  This clock driver adds support for clock realted settings for
 	  ZynqMP platform.
 
+config CLK_SCMI
+	bool "Enable SCMI clock driver"
+	depends on SCMI_FIRMWARE
+	help
+	  Enable this option if you want to support clock devices exposed
+	  by a SCMI agent based on SCMI clock protocol communication
+	  with a SCMI server.
+
+config SPL_CLK_SCMI
+	bool "Enable SCMI clock driver in SPL"
+	depends on SPL_SCMI_FIRMWARE
+	help
+	  Enable this option in SPL if you want to support clock devices exposed
+	  by a SCMI agent based on SCMI clock protocol communication
+	  with a SCMI server.
+
 source "drivers/clk/tegra/Kconfig"
 source "drivers/clk/uniphier/Kconfig"
 source "drivers/clk/exynos/Kconfig"
 source "drivers/clk/at91/Kconfig"
 source "drivers/clk/renesas/Kconfig"
+source "drivers/clk/rockchip/Kconfig"
 
 endmenu

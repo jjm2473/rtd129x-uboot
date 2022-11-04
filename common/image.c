@@ -15,14 +15,6 @@
 #include <status_led.h>
 #endif
 
-#ifdef CONFIG_HAS_DATAFLASH
-#include <dataflash.h>
-#endif
-
-#ifdef CONFIG_LOGBUFFER
-#include <logbuff.h>
-#endif
-
 #include <rtc.h>
 
 #include <environment.h>
@@ -30,7 +22,7 @@
 #include <mapmem.h>
 
 #if IMAGE_ENABLE_FIT || IMAGE_ENABLE_OF_LIBFDT
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <fdt_support.h>
 #include <fpga.h>
 #include <xilinx.h>
@@ -94,11 +86,14 @@ static const table_entry_t uimage_arch[] = {
 	{	IH_ARCH_ARC,		"arc",		"ARC",		},
 	{	IH_ARCH_X86_64,		"x86_64",	"AMD x86_64",	},
 	{	IH_ARCH_XTENSA,		"xtensa",	"Xtensa",	},
+	{	IH_ARCH_RISCV,		"riscv",	"RISC-V",	},
 	{	-1,			"",		"",		},
 };
 
 static const table_entry_t uimage_os[] = {
 	{	IH_OS_INVALID,	"invalid",	"Invalid OS",		},
+	{       IH_OS_OP_TEE, "op-tee", "OP-TEE"  },
+	{       IH_OS_ARM_TRUSTED_FIRMWARE, "arm-trusted-firmware", "ARM Trusted Firmware"  },
 	{	IH_OS_LINUX,	"linux",	"Linux",		},
 #if defined(CONFIG_LYNXKDI) || defined(USE_HOSTCC)
 	{	IH_OS_LYNXOS,	"lynxos",	"LynxOS",		},
@@ -167,6 +162,8 @@ static const table_entry_t uimage_type[] = {
 	{	IH_TYPE_FPGA,       "fpga",       "FPGA Image" },
 	{       IH_TYPE_TEE,        "tee",        "Trusted Execution Environment Image",},
 	{	IH_TYPE_FIRMWARE_IVT, "firmware_ivt", "Firmware with HABv4 IVT" },
+	{       IH_TYPE_PMMC,        "pmmc",        "TI Power Management Micro-Controller Firmware",},
+	{	IH_TYPE_RKNAND,     "rknand",     "Rockchip NAND Boot Image" },
 	{	-1,		    "",		  "",			},
 };
 
@@ -196,6 +193,26 @@ static const struct table_info table_info[IH_COUNT] = {
 /*****************************************************************************/
 /* Legacy format routines */
 /*****************************************************************************/
+#ifndef USE_HOSTCC
+#ifndef CONFIG_SPL_BUILD
+uint32_t image_get_load(const image_header_t *hdr)
+{
+	uint32_t load = uimage_to_cpu(hdr->ih_load);
+
+	return (load == IMAGE_PARAM_INVAL) ?
+		env_get_ulong("kernel_addr_r", 16, 0) : load;
+}
+
+uint32_t image_get_ep(const image_header_t *hdr)
+{
+	uint32_t ep = uimage_to_cpu(hdr->ih_ep);
+
+	return (ep == IMAGE_PARAM_INVAL) ?
+		env_get_ulong("kernel_addr_r", 16, 0) : ep;
+}
+#endif
+#endif
+
 int image_check_hcrc(const image_header_t *hdr)
 {
 	ulong hcrc;
@@ -243,7 +260,7 @@ ulong image_multi_count(const image_header_t *hdr)
 	size = (uint32_t *)image_get_data(hdr);
 
 	/* count non empty slots */
-	for (i = 0; size[i]; ++i)
+	for (i = 0; size[i] != IMAGE_PARAM_INVAL; ++i)
 		count++;
 
 	return count;
@@ -387,9 +404,6 @@ void image_print_contents(const void *ptr)
  * header. Routine receives image start address and expected architecture
  * flag. Verification done covers data and header integrity and os/type/arch
  * fields checking.
- *
- * If dataflash support is enabled routine checks for dataflash addresses
- * and handles required dataflash reads.
  *
  * returns:
  *     pointer to a ramdisk image header, if image was found and valid
@@ -889,81 +903,6 @@ int genimg_get_format(const void *img_addr)
 }
 
 /**
- * genimg_get_image - get image from special storage (if necessary)
- * @img_addr: image start address
- *
- * genimg_get_image() checks if provided image start address is located
- * in a dataflash storage. If so, image is moved to a system RAM memory.
- *
- * returns:
- *     image start address after possible relocation from special storage
- */
-ulong genimg_get_image(ulong img_addr)
-{
-	ulong ram_addr = img_addr;
-
-#ifdef CONFIG_HAS_DATAFLASH
-	ulong h_size, d_size;
-
-	if (addr_dataflash(img_addr)) {
-		void *buf;
-
-		/* ger RAM address */
-		ram_addr = CONFIG_SYS_LOAD_ADDR;
-
-		/* get header size */
-		h_size = image_get_header_size();
-#if IMAGE_ENABLE_FIT
-		if (sizeof(struct fdt_header) > h_size)
-			h_size = sizeof(struct fdt_header);
-#endif
-
-		/* read in header */
-		debug("   Reading image header from dataflash address "
-			"%08lx to RAM address %08lx\n", img_addr, ram_addr);
-
-		buf = map_sysmem(ram_addr, 0);
-		read_dataflash(img_addr, h_size, buf);
-
-		/* get data size */
-		switch (genimg_get_format(buf)) {
-#if defined(CONFIG_IMAGE_FORMAT_LEGACY)
-		case IMAGE_FORMAT_LEGACY:
-			d_size = image_get_data_size(buf);
-			debug("   Legacy format image found at 0x%08lx, "
-					"size 0x%08lx\n",
-					ram_addr, d_size);
-			break;
-#endif
-#if IMAGE_ENABLE_FIT
-		case IMAGE_FORMAT_FIT:
-			d_size = fit_get_size(buf) - h_size;
-			debug("   FIT/FDT format image found at 0x%08lx, "
-					"size 0x%08lx\n",
-					ram_addr, d_size);
-			break;
-#endif
-		default:
-			printf("   No valid image found at 0x%08lx\n",
-				img_addr);
-			return ram_addr;
-		}
-
-		/* read in image data */
-		debug("   Reading image remaining data from dataflash address "
-			"%08lx to RAM address %08lx\n", img_addr + h_size,
-			ram_addr + h_size);
-
-		read_dataflash(img_addr + h_size, d_size,
-				(char *)(buf + h_size));
-
-	}
-#endif /* CONFIG_HAS_DATAFLASH */
-
-	return ram_addr;
-}
-
-/**
  * fit_has_config - check if there is a valid FIT configuration
  * @images: pointer to the bootm command headers structure
  *
@@ -1094,9 +1033,6 @@ int boot_get_ramdisk(int argc, char * const argv[], bootm_headers_t *images,
 				return 1;
 		}
 #endif
-
-		/* copy from dataflash if needed */
-		rd_addr = genimg_get_image(rd_addr);
 
 		/*
 		 * Check if there is an initrd image at the
@@ -1237,11 +1173,6 @@ int boot_ramdisk_high(struct lmb *lmb, ulong rd_data, ulong rd_len,
 	}
 
 
-#ifdef CONFIG_LOGBUFFER
-	/* Prevent initrd from overwriting logbuffer */
-	lmb_reserve(lmb, logbuffer_base() - LOGBUFF_OVERHEAD, LOGBUFF_RESERVE);
-#endif
-
 	debug("## initrd_high = 0x%08lx, copy_to_ram = %d\n",
 			initrd_high, initrd_copy_to_ram);
 
@@ -1252,6 +1183,9 @@ int boot_ramdisk_high(struct lmb *lmb, ulong rd_data, ulong rd_len,
 			*initrd_end = rd_data + rd_len;
 			lmb_reserve(lmb, rd_data, rd_len);
 		} else {
+			if (initrd_high && env_get_yesno("bootm-reloc-at"))
+				initrd_high += rd_len;
+
 			if (initrd_high)
 				*initrd_start = (ulong)lmb_alloc_base(lmb,
 						rd_len, 0x1000, initrd_high);
@@ -1329,10 +1263,8 @@ int boot_get_fpga(int argc, char * const argv[], bootm_headers_t *images,
 
 	/*
 	 * Obtain the os FIT header from the images struct
-	 * copy from dataflash if needed
 	 */
 	tmp_img_addr = map_to_sysmem(images->fit_hdr_os);
-	tmp_img_addr = genimg_get_image(tmp_img_addr);
 	buf = map_sysmem(tmp_img_addr, 0);
 	/*
 	 * Check image type. For FIT images get FIT node
@@ -1441,10 +1373,8 @@ int boot_get_loadable(int argc, char * const argv[], bootm_headers_t *images,
 
 	/*
 	 * Obtain the os FIT header from the images struct
-	 * copy from dataflash if needed
 	 */
 	tmp_img_addr = map_to_sysmem(images->fit_hdr_os);
-	tmp_img_addr = genimg_get_image(tmp_img_addr);
 	buf = map_sysmem(tmp_img_addr, 0);
 	/*
 	 * Check image type. For FIT images get FIT node

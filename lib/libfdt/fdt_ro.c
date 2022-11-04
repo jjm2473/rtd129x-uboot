@@ -3,11 +3,11 @@
  * Copyright (C) 2006 David Gibson, IBM Corporation.
  * SPDX-License-Identifier:	GPL-2.0+ BSD-2-Clause
  */
-#include <libfdt_env.h>
+#include <linux/libfdt_env.h>
 
 #ifndef USE_HOSTCC
 #include <fdt.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #else
 #include "fdt_host.h"
 #endif
@@ -517,6 +517,29 @@ int fdt_node_offset_by_phandle(const void *fdt, uint32_t phandle)
 	 * node.  Still it's the easiest to implement approach;
 	 * performance can come later. */
 	for (offset = fdt_next_node(fdt, -1, NULL);
+	     offset >= 0;
+	     offset = fdt_next_node(fdt, offset, NULL)) {
+		if (fdt_get_phandle(fdt, offset) == phandle)
+			return offset;
+	}
+
+	return offset; /* error from fdt_next_node() */
+}
+
+int fdt_node_offset_by_phandle_node(const void *fdt, int node, uint32_t phandle)
+{
+	int offset;
+
+	if ((phandle == 0) || (phandle == -1) || (node < 0))
+		return -FDT_ERR_BADPHANDLE;
+
+	FDT_CHECK_HEADER(fdt);
+
+	offset = node;
+	if (fdt_get_phandle(fdt, offset) == phandle)
+		return offset;
+
+	for (offset = fdt_next_node(fdt, offset, NULL);
 	     offset >= 0;
 	     offset = fdt_next_node(fdt, offset, NULL)) {
 		if (fdt_get_phandle(fdt, offset) == phandle)

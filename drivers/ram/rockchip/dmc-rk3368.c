@@ -13,12 +13,12 @@
 #include <regmap.h>
 #include <syscon.h>
 #include <asm/io.h>
-#include <asm/arch/clock.h>
-#include <asm/arch/cru_rk3368.h>
-#include <asm/arch/grf_rk3368.h>
-#include <asm/arch/ddr_rk3368.h>
-#include <asm/arch/sdram.h>
-#include <asm/arch/sdram_common.h>
+#include <asm/arch-rockchip/clock.h>
+#include <asm/arch-rockchip/cru_rk3368.h>
+#include <asm/arch-rockchip/grf_rk3368.h>
+#include <asm/arch-rockchip/ddr_rk3368.h>
+#include <asm/arch-rockchip/sdram_rk3288.h>
+#include <asm/arch-rockchip/sdram.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -230,7 +230,7 @@ static int memory_init(struct rk3368_ddr_pctl *pctl,
 	tmp = get_timer(0);
 	do {
 		if (get_timer(tmp) > timeout_ms) {
-			error("%s: POWER_UP_START did not complete in %ld ms\n",
+			pr_err("%s: POWER_UP_START did not complete in %ld ms\n",
 			      __func__, timeout_ms);
 			return -ETIME;
 		}
@@ -422,7 +422,7 @@ static int dfi_cfg(struct rk3368_ddr_pctl *pctl)
 	tmp = get_timer(0);
 	do {
 		if (get_timer(tmp) > timeout_ms) {
-			error("%s: DFI init did not complete within %ld ms\n",
+			pr_err("%s: DFI init did not complete within %ld ms\n",
 			      __func__, timeout_ms);
 			return -ETIME;
 		}
@@ -457,7 +457,7 @@ static int pctl_calc_timings(struct rk3368_sdram_params *params,
 	u32 tfaw_as_ps;
 
 	if (params->ddr_speed_bin != DDR3_1600K) {
-		error("%s: unimplemented DDR3 speed bin %d\n",
+		pr_err("%s: unimplemented DDR3 speed bin %d\n",
 		      __func__, params->ddr_speed_bin);
 		return -1;
 	}
@@ -585,7 +585,7 @@ static int ddrphy_data_training(struct rk3368_ddr_pctl *pctl,
 	tmp = get_timer(0);
 	do {
 		if (get_timer(tmp) > timeout_ms) {
-			error("%s: did not complete within %ld ms\n",
+			pr_err("%s: did not complete within %ld ms\n",
 			      __func__, timeout_ms);
 			return -ETIME;
 		}
@@ -625,7 +625,7 @@ static int sdram_col_row_detect(struct udevice *dev)
 	}
 
 	if (col == 8) {
-		error("%s: col detect error\n", __func__);
+		pr_err("%s: col detect error\n", __func__);
 		return -EINVAL;
 	}
 
@@ -644,7 +644,7 @@ static int sdram_col_row_detect(struct udevice *dev)
 	}
 
 	if (row == 11) {
-		error("%s: row detect error\n", __func__);
+		pr_err("%s: row detect error\n", __func__);
 		return -EINVAL;
 	}
 
@@ -764,7 +764,7 @@ static int msch_niu_config(struct rk3368_msch *msch,
 		}
 	}
 
-	error("%s: ddrconf (NIU config) not found\n", __func__);
+	pr_err("%s: ddrconf (NIU config) not found\n", __func__);
 	return -EINVAL;
 }
 
@@ -845,7 +845,11 @@ static int setup_sdram(struct udevice *dev)
 	move_to_access_state(pctl);
 
 	/* TODO(prt): could detect rank in training... */
+#ifdef CONFIG_TARGET_EVB_PX5
+	params->chan.rank = 1;
+#else
 	params->chan.rank = 2;
+#endif
 	/* TODO(prt): bus width is not auto-detected (yet)... */
 	params->chan.bw = 2;  /* 32bit wide bus */
 	params->chan.dbw = params->chan.dbw;  /* 32bit wide bus */
@@ -893,17 +897,10 @@ static int conv_of_platdata(struct udevice *dev)
 {
 	struct rk3368_sdram_params *plat = dev_get_platdata(dev);
 	struct dtd_rockchip_rk3368_dmc *of_plat = &plat->of_plat;
-	int ret;
 
 	plat->ddr_freq = of_plat->rockchip_ddr_frequency;
 	plat->ddr_speed_bin = of_plat->rockchip_ddr_speed_bin;
 	plat->memory_schedule = of_plat->rockchip_memory_schedule;
-
-	ret = regmap_init_mem_platdata(dev, of_plat->reg,
-				       ARRAY_SIZE(of_plat->reg) / 2,
-				       &plat->map);
-	if (ret)
-		return ret;
 
 	return 0;
 }
@@ -933,8 +930,8 @@ static int rk3368_dmc_probe(struct udevice *dev)
 	debug("%s: pmugrf=%p\n", __func__, priv->pmugrf);
 
 #ifdef CONFIG_TPL_BUILD
-	pctl = regmap_get_range(plat->map, 0);
-	ddrphy = regmap_get_range(plat->map, 1);
+	pctl = (struct rk3368_ddr_pctl *)plat->of_plat.reg[0];
+	ddrphy = (struct rk3368_ddrphy *)plat->of_plat.reg[2];
 	msch = syscon_get_first_range(ROCKCHIP_SYSCON_MSCH);
 	grf = syscon_get_first_range(ROCKCHIP_SYSCON_GRF);
 

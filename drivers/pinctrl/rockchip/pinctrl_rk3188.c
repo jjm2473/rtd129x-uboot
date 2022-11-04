@@ -10,11 +10,11 @@
 #include <errno.h>
 #include <syscon.h>
 #include <asm/io.h>
-#include <asm/arch/clock.h>
-#include <asm/arch/grf_rk3188.h>
-#include <asm/arch/hardware.h>
-#include <asm/arch/periph.h>
-#include <asm/arch/pmu_rk3188.h>
+#include <asm/arch-rockchip/clock.h>
+#include <asm/arch-rockchip/grf_rk3188.h>
+#include <asm/arch-rockchip/hardware.h>
+#include <asm/arch-rockchip/periph.h>
+#include <asm/arch-rockchip/pmu_rk3188.h>
 #include <dm/pinctrl.h>
 #include <dm/root.h>
 

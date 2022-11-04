@@ -59,7 +59,9 @@ scm_version()
 			# If we are past a tagged commit (like
 			# "v2.6.30-rc5-302-g72357d5"), we pretty print it.
 			if atag="`git describe 2>/dev/null`"; then
-				echo "$atag" | awk -F- '{printf("-%05d-%s", $(NF-1),$(NF))}'
+				echo "$atag" | awk -F- '{printf("-%s", $(NF))}'
+				date=`git log -1 --author='@rock-chips' --date=format:%y%m%d | sed -n '/Date:/p' | awk '{ print "-"$2 }'`
+				printf '%s' $date
 
 			# If we don't have a tag at all we print -g{commitish}.
 			else
@@ -76,6 +78,8 @@ scm_version()
 		if git diff-index --name-only HEAD | grep -qv "^scripts/package"; then
 			printf '%s' -dirty
 		fi
+
+		printf ' \#%s' $USER
 
 		# All done with git
 		return
@@ -157,8 +161,13 @@ if test ! "$srctree" -ef .; then
 	res="$res$(collect_files "$srctree"/localversion*)"
 fi
 
+LINUX_COMMIT=$(git log -1 | grep "commit" | awk -F ' ' '{print $2}')
+
+XML_PATH=`readlink -f ../.repo/manifest.xml`
+XML_NAME=${XML_PATH##*/}
+
 # CONFIG_LOCALVERSION and LOCALVERSION (if set)
-res="${res}${CONFIG_LOCALVERSION}${LOCALVERSION}"
+res="${res}${CONFIG_LOCALVERSION}\(u-boot commit id: ${LINUX_COMMIT}\)\(sdk version: ${XML_NAME}\)${LOCALVERSION}"
 
 # scm version string if not at a tagged commit
 if test "$CONFIG_LOCALVERSION_AUTO" = "y"; then

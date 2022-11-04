@@ -10,7 +10,7 @@
 #include <common.h>
 #include <dm.h>
 #include <dm/lists.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <linux/arm-smccc.h>
 #include <linux/errno.h>
 #include <linux/psci.h>
@@ -56,11 +56,9 @@ static int psci_bind(struct udevice *dev)
 
 static int psci_probe(struct udevice *dev)
 {
-	DECLARE_GLOBAL_DATA_PTR;
 	const char *method;
 
-	method = fdt_stringlist_get(gd->fdt_blob, dev_of_offset(dev), "method",
-				    0, NULL);
+	method = dev_read_prop(dev, "method", NULL);
 	if (!method) {
 		printf("missing \"method\" property\n");
 		return -ENXIO;

@@ -10,6 +10,7 @@
 #define USB_EHCI_H
 
 #include <usb.h>
+#include <generic-phy.h>
 
 /* Section 2.2.3 - N_PORTS */
 #define MAX_HC_PORTS		15
@@ -101,11 +102,11 @@ struct usb_linux_config_descriptor {
 } __attribute__ ((packed));
 
 #if defined CONFIG_EHCI_DESC_BIG_ENDIAN
-#define ehci_readl(x)		cpu_to_be32(readl(x))
-#define ehci_writel(a, b)	writel(cpu_to_be32(b), a)
+#define ehci_readl(x)		be32_to_cpu(__raw_readl(x))
+#define ehci_writel(a, b)	__raw_writel(cpu_to_be32(b), a)
 #else
-#define ehci_readl(x)		cpu_to_le32(readl(x))
-#define ehci_writel(a, b)	writel(cpu_to_le32(b), a)
+#define ehci_readl(x)		readl(x)
+#define ehci_writel(a, b)	writel(b, a)
 #endif
 
 #if defined CONFIG_EHCI_MMIO_BIG_ENDIAN
@@ -252,6 +253,7 @@ struct ehci_ctrl {
 	int periodic_schedules;
 	int ntds;
 	struct ehci_ops ops;
+	struct usb_hub_descriptor hub;
 	void *priv;	/* client's private data */
 };
 
@@ -288,5 +290,9 @@ int ehci_register(struct udevice *dev, struct ehci_hccr *hccr,
 		  uint tweaks, enum usb_init_type init);
 int ehci_deregister(struct udevice *dev);
 extern struct dm_usb_ops ehci_usb_ops;
+
+/* EHCI PHY functions */
+int ehci_setup_phy(struct udevice *dev, struct phy *phy, int index);
+int ehci_shutdown_phy(struct udevice *dev, struct phy *phy);
 
 #endif /* USB_EHCI_H */

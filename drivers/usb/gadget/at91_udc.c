@@ -25,7 +25,6 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb/at91_udc.h>
 #include <malloc.h>
-#include <usb/lin_gadget_compat.h>
 
 #include "at91_udc.h"
 
@@ -1456,7 +1455,7 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
 
 	ret = driver->bind(&udc->gadget);
 	if (ret) {
-		error("driver->bind() returned %d\n", ret);
+		pr_err("driver->bind() returned %d\n", ret);
 		udc->driver = NULL;
 	}
 
@@ -1468,7 +1467,7 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	struct at91_udc *udc = controller;
 
 	if (!driver || !driver->unbind || !driver->disconnect) {
-		error("bad paramter\n");
+		pr_err("bad paramter\n");
 		return -EINVAL;
 	}
 

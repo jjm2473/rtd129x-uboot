@@ -37,6 +37,9 @@ struct uclass {
 	struct uclass_driver *uc_drv;
 	struct list_head dev_head;
 	struct list_head sibling_node;
+#ifdef CONFIG_USING_KERNEL_DTB_V2
+	struct list_head *u_boot_dev_head;
+#endif
 };
 
 struct driver;
@@ -128,6 +131,14 @@ int uclass_get(enum uclass_id key, struct uclass **ucp);
 const char *uclass_get_name(enum uclass_id id);
 
 /**
+ * uclass_get_by_name() - Look up a uclass by its driver name
+ *
+ * @name: Name to look up
+ * @returns the associated uclass ID, or UCLASS_INVALID if not found
+ */
+enum uclass_id uclass_get_by_name(const char *name);
+
+/**
  * uclass_get_device() - Get a uclass device based on an ID and index
  *
  * The device is probed to activate it ready for use.
@@ -201,6 +212,22 @@ int uclass_get_device_by_of_offset(enum uclass_id id, int node,
  */
 int uclass_get_device_by_ofnode(enum uclass_id id, ofnode node,
 				struct udevice **devp);
+
+/**
+ * uclass_get_device_by_phandle_id() - Get a uclass device by phandle id
+ *
+ * This searches the devices in the uclass for one with the given phandle id.
+ *
+ * The device is probed to activate it ready for use.
+ *
+ * @id: uclass ID to look up
+ * @phandle_id: the phandle id to look up
+ * @devp: Returns pointer to device (there is only one for each node)
+ * @return 0 if OK, -ENODEV if there is no device match the phandle, other
+ *	-ve on error
+ */
+int uclass_get_device_by_phandle_id(enum uclass_id id, uint phandle_id,
+				    struct udevice **devp);
 
 /**
  * uclass_get_device_by_phandle() - Get a uclass device by phandle

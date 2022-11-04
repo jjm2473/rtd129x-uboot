@@ -8,6 +8,8 @@
 #ifndef __SYSCON_H
 #define __SYSCON_H
 
+#include <fdtdec.h>
+
 /**
  * struct syscon_uc_info - Information stored by the syscon UCLASS_UCLASS
  *
@@ -28,9 +30,11 @@ struct syscon_ops {
  * We don't support 64-bit machines. If they are so resource-contrained that
  * they need to use OF_PLATDATA, something is horribly wrong with the
  * education of our hardware engineers.
+ *
+ * Update: 64-bit is now supported and we have an education crisis.
  */
 struct syscon_base_platdata {
-	u32 reg[2];
+	fdt_val_t reg[2];
 };
 #endif
 
@@ -68,6 +72,19 @@ int syscon_get_by_driver_data(ulong driver_data, struct udevice **devp);
  * @return register map correponding to @driver_data, or -ve error code
  */
 struct regmap *syscon_get_regmap_by_driver_data(ulong driver_data);
+
+/**
+ * syscon_regmap_lookup_by_phandle() - Look up a controller by a phandle
+ *
+ * This operates by looking up the given name in the device (device
+ * tree property) of the device using the system controller.
+ *
+ * @dev:	Device using the system controller
+ * @name:	Name of property referring to the system controller
+ * @return	A pointer to the regmap if found, ERR_PTR(-ve) on error
+ */
+struct regmap *syscon_regmap_lookup_by_phandle(struct udevice *dev,
+					       const char *name);
 
 /**
  * syscon_get_first_range() - get the first memory range from a syscon regmap

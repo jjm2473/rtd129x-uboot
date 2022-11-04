@@ -8,7 +8,7 @@
 #include <common.h>
 #include <bootm.h>
 #include <fdt_support.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <malloc.h>
 #include <vxworks.h>
 
@@ -469,7 +469,7 @@ static boot_os_fn *boot_os[] = {
 };
 
 /* Allow for arch specific config before we boot */
-__weak void arch_preboot_os(void)
+__weak void arch_preboot_os(uint32_t bootm_state, bootm_headers_t *images)
 {
 	/* please define platform specific arch_preboot_os() */
 }
@@ -477,7 +477,7 @@ __weak void arch_preboot_os(void)
 int boot_selected_os(int argc, char * const argv[], int state,
 		     bootm_headers_t *images, boot_os_fn *boot_fn)
 {
-	arch_preboot_os();
+	arch_preboot_os(state, images);
 	boot_fn(state, argc, argv, images);
 
 	/* Stand-alone may return when 'autostart' is 'no' */

@@ -20,6 +20,10 @@ obj-$(CONFIG_ARM_SMCCC)		+= smccc-call.o
 obj-$(CONFIG_ARMV7_NONSEC)	+= nonsec_virt.o virt-v7.o virt-dt.o
 obj-$(CONFIG_ARMV7_PSCI)	+= psci.o psci-common.o
 
+ifeq ($(CONFIG_SPL_BUILD)$(CONFIG_TPL_BUILD),)
+obj-$(CONFIG_ARM_CPU_SUSPEND)	+= suspend.o sleep.o
+endif
+
 obj-$(CONFIG_IPROC) += iproc-common/
 obj-$(CONFIG_KONA) += kona-common/
 obj-$(CONFIG_SYS_ARCH_TIMER) += arch_timer.o

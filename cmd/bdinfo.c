@@ -180,7 +180,7 @@ int do_bdinfo(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	print_bi_flash(bd);
 	print_num("sramstart",		bd->bi_sramstart);
 	print_num("sramsize",		bd->bi_sramsize);
-#if	defined(CONFIG_8xx) || defined(CONFIG_E500)
+#if	defined(CONFIG_MPC8xx) || defined(CONFIG_E500)
 	print_num("immr_base",		bd->bi_immr_base);
 #endif
 	print_num("bootflags",		bd->bi_bootflags);
@@ -409,6 +409,21 @@ int do_bdinfo(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
 	bd_t *bd = gd->bd;
 
 	print_num("arch_number",	bd->bi_arch_number);
+	print_bi_boot_params(bd);
+	print_bi_dram(bd);
+	print_eth_ip_addr();
+	print_baudrate();
+
+	return 0;
+}
+
+#elif defined(CONFIG_RISCV)
+
+int do_bdinfo(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
+{
+	bd_t *bd = gd->bd;
+
+	print_num("arch_number", bd->bi_arch_number);
 	print_bi_boot_params(bd);
 	print_bi_dram(bd);
 	print_eth_ip_addr();

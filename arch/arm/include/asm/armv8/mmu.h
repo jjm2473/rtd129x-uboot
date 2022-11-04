@@ -8,15 +8,6 @@
 #ifndef _ASM_ARMV8_MMU_H_
 #define _ASM_ARMV8_MMU_H_
 
-/***************************************************************/
-/*
- * The following definitions are related each other, shoud be
- * calculated specifically.
- */
-
-#define VA_BITS			CONFIG_SYS_VA_BITS
-#define PTE_BLOCK_BITS		CONFIG_SYS_PTL2_BITS
-
 /*
  * block/section address mask and size definitions.
  */
@@ -25,7 +16,7 @@
 #undef  PAGE_SIZE
 #define PAGE_SHIFT		12
 #define PAGE_SIZE		(1 << PAGE_SHIFT)
-#define PAGE_MASK		(~(PAGE_SIZE-1))
+#define PAGE_MASK		(~(PAGE_SIZE - 1))
 
 /***************************************************************/
 
@@ -52,6 +43,7 @@
 #define PTE_TYPE_MASK		(3 << 0)
 #define PTE_TYPE_FAULT		(0 << 0)
 #define PTE_TYPE_TABLE		(3 << 0)
+#define PTE_TYPE_PAGE		(3 << 0)
 #define PTE_TYPE_BLOCK		(1 << 0)
 #define PTE_TYPE_VALID		(1 << 0)
 

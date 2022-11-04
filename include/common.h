@@ -23,17 +23,21 @@ typedef volatile unsigned char	vu_char;
 #include <time.h>
 #include <asm-offsets.h>
 #include <linux/bitops.h>
+#include <linux/bug.h>
 #include <linux/delay.h>
 #include <linux/types.h>
+#include <linux/printk.h>
 #include <linux/string.h>
 #include <linux/stringify.h>
 #include <asm/ptrace.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <linux/kernel.h>
 
 #include <part.h>
 #include <flash.h>
 #include <image.h>
+#include <stacktrace.h>
 
 /* Bring in printf format macros if inttypes.h is included */
 #define __STDC_FORMAT_MACROS
@@ -42,71 +46,18 @@ typedef volatile unsigned char	vu_char;
 #define CONFIG_SYS_SUPPORT_64BIT_DATA
 #endif
 
-#ifdef DEBUG
-#define _DEBUG	1
-#else
-#define _DEBUG	0
+#include <log.h>
+
+#if (__STDC_VERSION__ >= 201112L) || defined(__cplusplus)
+# undef static_assert
+# define static_assert _Static_assert
 #endif
 
-#ifdef CONFIG_SPL_BUILD
-#define _SPL_BUILD	1
-#else
-#define _SPL_BUILD	0
-#endif
-
-/* Define this at the top of a file to add a prefix to debug messages */
-#ifndef pr_fmt
-#define pr_fmt(fmt) fmt
-#endif
-
-/*
- * Output a debug text when condition "cond" is met. The "cond" should be
- * computed by a preprocessor in the best case, allowing for the best
- * optimization.
- */
-#define debug_cond(cond, fmt, args...)			\
-	do {						\
-		if (cond)				\
-			printf(pr_fmt(fmt), ##args);	\
-	} while (0)
-
-/* Show a message if DEBUG is defined in a file */
-#define debug(fmt, args...)			\
-	debug_cond(_DEBUG, fmt, ##args)
-
-/* Show a message if not in SPL */
-#define warn_non_spl(fmt, args...)			\
-	debug_cond(!_SPL_BUILD, fmt, ##args)
-
-/*
- * An assertion is run-time check done in debug mode only. If DEBUG is not
- * defined then it is skipped. If DEBUG is defined and the assertion fails,
- * then it calls panic*( which may or may not reset/halt U-Boot (see
- * CONFIG_PANIC_HANG), It is hoped that all failing assertions are found
- * before release, and after release it is hoped that they don't matter. But
- * in any case these failing assertions cannot be fixed with a reset (which
- * may just do the same assertion again).
- */
-void __assert_fail(const char *assertion, const char *file, unsigned line,
-		   const char *function);
-#define assert(x) \
-	({ if (!(x) && _DEBUG) \
-		__assert_fail(#x, __FILE__, __LINE__, __func__); })
-
-#define error(fmt, args...) do {					\
-		printf("ERROR: " pr_fmt(fmt) "\nat %s:%d/%s()\n",	\
-			##args, __FILE__, __LINE__, __func__);		\
-} while (0)
-
-#ifndef BUG
-#define BUG() do { \
-	printf("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __FUNCTION__); \
-	panic("BUG!"); \
-} while (0)
-#define BUG_ON(condition) do { if (unlikely((condition)!=0)) BUG(); } while(0)
-#endif /* BUG */
-
+#if !CONFIG_IS_ENABLED(IRQ)
 typedef void (interrupt_handler_t)(void *);
+#else
+typedef void (interrupt_handler_t)(int, void *);
+#endif
 
 #include <asm/u-boot.h> /* boot information for Linux kernel */
 #include <asm/global_data.h>	/* global data used for startup functions */
@@ -152,6 +103,7 @@ int	cpu_init(void);
 
 /* common/main.c */
 void	main_loop	(void);
+void autoboot_command_fail_handle(void);
 int run_command(const char *cmd, int flag);
 int run_command_repeatable(const char *cmd, int flag);
 
@@ -194,6 +146,11 @@ ulong board_init_f_alloc_reserve(ulong top);
  */
 void board_init_f_init_reserve(ulong base);
 
+/*
+ * Board-specific Platform code can init serial earlier if needed
+ */
+__weak int board_init_f_boot_flags(void);
+
 /**
  * arch_setup_gd() - Set up the global_data pointer
  *
@@ -216,6 +173,7 @@ int last_stage_init(void);
 extern ulong monitor_flash_len;
 int mac_read_from_eeprom(void);
 extern u8 __dtb_dt_begin[];	/* embedded device tree blob */
+extern u8 __dtb_dt_spl_begin[];	/* embedded device tree blob for SPL/TPL */
 int set_cpu_clk_info(void);
 int mdm_init(void);
 int print_cpuinfo(void);
@@ -379,6 +337,63 @@ int env_get_yesno(const char *var);
 int env_set(const char *varname, const char *value);
 
 /**
+ * env_update() - update sub value of an environment variable
+ *
+ * This add/append/replace the sub value of an environment variable.
+ *
+ * @varname: Variable to adjust
+ * @valude: Value to append/replace
+ * @ignore: Value to be ignore if in varvalue
+ * @return 0 if OK, 1 on error
+ */
+int env_update_filter(const char *varname, const char *varvalue,
+		      const char *ignore);
+
+/**
+ * env_update_extract_subset() - extract subset value from an environment variable
+ *
+ * This extract subset value from an environment variable
+ *
+ * @varname: Parent Variable where to extract subset value, the subset value
+ *	     will be removed from it.
+ * @subset_varname: Variable to save subset value
+ * @subset_key: Key value to find out subset value
+ * @return 0 if OK, 1 on error
+ */
+int env_update_extract_subset(const char *varname,
+			      const char *subset_varname,
+			      const char *subset_key);
+/**
+ * env_update() - update sub value of an environment variable
+ *
+ * This add/append/replace the sub value of an environment variable.
+ *
+ * @varname: Variable to adjust
+ * @valude: Value to append/replace
+ * @return 0 if OK, 1 on error
+ */
+int env_update(const char *varname, const char *varvalue);
+
+/**
+ * env_exist() - check sub value of an environment variable is exist or not
+ *
+ * @varname: Variable to look up
+ * @value: Value to check
+ * @return posItion of varvalue if exist, otherwise NULL
+ */
+char *env_exist(const char *varname, const char *varvalue);
+
+/**
+ * env_delete() - delete sub value of an environment variable
+ *
+ * @varname: Variable to look up
+ * @value: Item head of value to delete
+ * @complete_match: complete match whole words
+ * @return 0 if ok, 1 on error
+ */
+int env_delete(const char *varname, const char *varvalue, int complete_match);
+
+/**
  * env_set_ulong() - set an environment variable to an integer
  *
  * @varname: Variable to adjust
@@ -452,19 +467,11 @@ int  eeprom_write (unsigned dev_addr, unsigned offset, uchar *buffer, unsigned c
 #define eeprom_write(dev_addr, offset, buffer, cnt) ((void)-ENOSYS)
 #endif
 
-/*
- * Set this up regardless of board
- * type, to prevent errors.
- */
-#if defined(CONFIG_SPI) || !defined(CONFIG_SYS_I2C_EEPROM_ADDR)
-# define CONFIG_SYS_DEF_EEPROM_ADDR 0
-#else
-#if !defined(CONFIG_ENV_EEPROM_IS_ON_I2C)
+#if !defined(CONFIG_ENV_EEPROM_IS_ON_I2C) && defined(CONFIG_SYS_I2C_EEPROM_ADDR)
 # define CONFIG_SYS_DEF_EEPROM_ADDR CONFIG_SYS_I2C_EEPROM_ADDR
 #endif
-#endif /* CONFIG_SPI || !defined(CONFIG_SYS_I2C_EEPROM_ADDR) */
 
-#if defined(CONFIG_SPI)
+#if defined(CONFIG_MPC8XX_SPI)
 extern void spi_init_f (void);
 extern void spi_init_r (void);
 extern ssize_t spi_read	 (uchar *, int, uchar *, int);
@@ -478,6 +485,7 @@ int board_late_init (void);
 int board_postclk_init (void); /* after clocks/timebase, before env/serial */
 int board_early_init_r (void);
 void board_poweroff (void);
+void board_env_fixup(void);
 
 #if defined(CONFIG_SYS_DRAM_TEST)
 int testdram(void);
@@ -529,6 +537,10 @@ int	is_core_valid (unsigned int);
  */
 int arch_cpu_init(void);
 
+int arch_fpga_init(void);
+
+void s_init(void);
+
 int	checkcpu      (void);
 int	checkicache   (void);
 int	checkdcache   (void);
@@ -546,6 +558,7 @@ void smp_kick_all_cpus(void);
 int	serial_init   (void);
 void	serial_setbrg (void);
 void	serial_putc   (const char);
+void	serial_clear  (void);
 void	serial_putc_raw(const char);
 void	serial_puts   (const char *);
 int	serial_getc   (void);
@@ -624,6 +637,7 @@ ulong	usec2ticks    (unsigned long usec);
 ulong	ticks2usec    (unsigned long ticks);
 
 /* lib/gunzip.c */
+int gzip_parse_header(const unsigned char *src, unsigned long len);
 int gunzip(void *, int, unsigned char *, unsigned long *);
 int zunzip(void *dst, int dstlen, unsigned char *src, unsigned long *lenp,
 						int stoponerr, int offset);
@@ -667,8 +681,7 @@ int gzwrite(unsigned char *src, int len,
 	    u64 startoffs,
 	    u64 szexpected);
 
-/* lib/lz4_wrapper.c */
-int ulz4fn(const void *src, size_t srcn, void *dst, size_t *dstn);
+#include <u-boot/lz4.h>
 
 /* lib/qsort.c */
 void qsort(void *base, size_t nmemb, size_t size,
@@ -699,46 +712,6 @@ unsigned int rand_r(unsigned int *seedp);
 /* serial stuff */
 int	serial_printf (const char *fmt, ...)
 		__attribute__ ((format (__printf__, 1, 2)));
-/* stdin */
-int	getc(void);
-int	tstc(void);
-
-/* stdout */
-#if !defined(CONFIG_SPL_BUILD) || \
-	(defined(CONFIG_TPL_BUILD) && defined(CONFIG_TPL_SERIAL_SUPPORT)) || \
-	(defined(CONFIG_SPL_BUILD) && !defined(CONFIG_TPL_BUILD) && \
-		defined(CONFIG_SPL_SERIAL_SUPPORT))
-void	putc(const char c);
-void	puts(const char *s);
-int	printf(const char *fmt, ...)
-		__attribute__ ((format (__printf__, 1, 2)));
-int	vprintf(const char *fmt, va_list args);
-#else
-#define	putc(...) do { } while (0)
-#define puts(...) do { } while (0)
-#define printf(...) do { } while (0)
-#define vprintf(...) do { } while (0)
-#endif
-
-/* stderr */
-#define eputc(c)		fputc(stderr, c)
-#define eputs(s)		fputs(stderr, s)
-#define eprintf(fmt,args...)	fprintf(stderr,fmt ,##args)
-
-/*
- * FILE based functions (can only be used AFTER relocation!)
- */
-#define stdin		0
-#define stdout		1
-#define stderr		2
-#define MAX_FILES	3
-
-int	fprintf(int file, const char *fmt, ...)
-		__attribute__ ((format (__printf__, 2, 3)));
-void	fputs(int file, const char *s);
-void	fputc(int file, const char c);
-int	ftstc(int file);
-int	fgetc(int file);
 
 /* lib/gzip.c */
 int gzip(void *dst, unsigned long *lenp,

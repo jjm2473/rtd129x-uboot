@@ -12,12 +12,65 @@
 #include <linux/linkage.h>
 
 /*
+ * Exception vectors.
+ */
+	.align	11
+	.globl	vectors
+vectors:
+	.align	7		/* Current EL Synchronous Thread */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_bad_sync
+	b	exception_exit
+
+	.align	7		/* Current EL IRQ Thread */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_bad_irq
+	b	exception_exit
+
+	.align	7		/* Current EL FIQ Thread */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_bad_fiq
+	b	exception_exit
+
+	.align	7		/* Current EL Error Thread */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_bad_error
+	b	exception_exit
+
+	.align	7		 /* Current EL Synchronous Handler */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_sync
+	b	exception_exit
+
+	.align	7		 /* Current EL IRQ Handler */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_irq
+	b	exception_exit
+
+	.align	7		 /* Current EL FIQ Handler */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_fiq
+	b	exception_exit
+
+	.align	7		 /* Current EL Error Handler */
+	stp	x29, x30, [sp, #-16]!
+	bl	_exception_entry
+	bl	do_error
+	b	exception_exit
+
+/*
  * Enter Exception.
  * This will save the processor state that is ELR/X0~X30
  * to the stack frame.
  */
-.macro	exception_entry
-	stp	x29, x30, [sp, #-16]!
+_exception_entry:
 	stp	x27, x28, [sp, #-16]!
 	stp	x25, x26, [sp, #-16]!
 	stp	x23, x24, [sp, #-16]!
@@ -37,89 +90,46 @@
 	switch_el x11, 3f, 2f, 1f
 3:	mrs	x1, esr_el3
 	mrs	x2, elr_el3
+	mrs	x3, daif
+	mrs	x4, vbar_el3
+	mrs	x5, spsr_el3
+	sub	x6, sp, #(8*30)
+	mrs	x7, sctlr_el3
+	mrs	x8, scr_el3
+	mrs	x9, ttbr0_el3
 	b	0f
 2:	mrs	x1, esr_el2
 	mrs	x2, elr_el2
+	mrs	x3, daif
+	mrs	x4, vbar_el2
+	mrs	x5, spsr_el2
+	sub	x6, sp, #(8*30)
+	mrs	x7, sctlr_el2
+	mrs	x8, hcr_el2
+	mrs	x9, ttbr0_el2
 	b	0f
+
 1:	mrs	x1, esr_el1
 	mrs	x2, elr_el1
+	mrs	x3, daif
+	mrs	x4, vbar_el1
+	mrs	x5, spsr_el1
+	sub	x6, sp, #(8*30)
+	mrs	x7, sctlr_el1
+	mov	x8, #0	/* Not used, EL1 don't have register, like 'scr_el1' */
+	mrs	x9, ttbr0_el1
 0:
-	stp	x2, x0, [sp, #-16]!
+	stp     x2, x0, [sp, #-16]!
+	stp	x3, x1, [sp, #-16]!
+	stp	x5, x4, [sp, #-16]!
+	stp	x7, x6, [sp, #-16]!
+	stp	x9, x8, [sp, #-16]!
 	mov	x0, sp
-.endm
+	ret
 
-/*
- * Exception vectors.
- */
-	.align	11
-	.globl	vectors
-vectors:
-	.align	7
-	b	_do_bad_sync	/* Current EL Synchronous Thread */
-
-	.align	7
-	b	_do_bad_irq	/* Current EL IRQ Thread */
-
-	.align	7
-	b	_do_bad_fiq	/* Current EL FIQ Thread */
-
-	.align	7
-	b	_do_bad_error	/* Current EL Error Thread */
-
-	.align	7
-	b	_do_sync	/* Current EL Synchronous Handler */
-
-	.align	7
-	b	_do_irq		/* Current EL IRQ Handler */
-
-	.align	7
-	b	_do_fiq		/* Current EL FIQ Handler */
-
-	.align	7
-	b	_do_error	/* Current EL Error Handler */
-
-
-_do_bad_sync:
-	exception_entry
-	bl	do_bad_sync
-	b	exception_exit
-
-_do_bad_irq:
-	exception_entry
-	bl	do_bad_irq
-	b	exception_exit
-
-_do_bad_fiq:
-	exception_entry
-	bl	do_bad_fiq
-	b	exception_exit
-
-_do_bad_error:
-	exception_entry
-	bl	do_bad_error
-	b	exception_exit
-
-_do_sync:
-	exception_entry
-	bl	do_sync
-	b	exception_exit
-
-_do_irq:
-	exception_entry
-	bl	do_irq
-	b	exception_exit
-
-_do_fiq:
-	exception_entry
-	bl	do_fiq
-	b	exception_exit
-
-_do_error:
-	exception_entry
-	bl	do_error
-	b	exception_exit
 
 exception_exit:
+	add	sp, sp, #(8*8)/* see: sys registers size of struct pt_regs */
 	ldp	x2, x0, [sp],#16
 	switch_el x11, 3f, 2f, 1f
 3:	msr	elr_el3, x2

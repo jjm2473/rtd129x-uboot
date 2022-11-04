@@ -111,6 +111,10 @@ config BOOTSTAGE_STASH_SIZE
 	  This should be large enough to hold the bootstage stash. A value of
 	  4096 (4KiB) is normally plenty.
 
+config BOOTSTAGE_PRINTF_TIMESTAMP
+	bool "Support printf timestamp"
+	help
+	  Enabling this will support printf timestamp.
 endmenu
 
 menu "Boot media"
@@ -174,6 +178,13 @@ config SPI_BOOT
 
 endmenu
 
+config PASS_DEVICE_SERIAL_BY_FDT
+	bool "Pass the device serial number to kernel through devicetree"
+	default y
+	help
+	  Enabling this will pass a device serial number to kernel by devicetree
+	  "serial-number" properties.
+
 config BOOTDELAY
 	int "delay in seconds before automatically booting"
 	default 2
@@ -202,6 +213,11 @@ config BOOTARGS
 	  CONFIG_BOOTARGS goes into the environment value "bootargs". Note that
 	  this value will also override the "chosen" node in FDT blob.
 
+config IO_TRACE
+	bool "Enable iotrace"
+	help
+	  This enable iotrace feature.
+
 menu "Console"
 
 config MENU
@@ -222,7 +238,8 @@ config CONSOLE_RECORD
 config CONSOLE_RECORD_OUT_SIZE
 	hex "Output buffer size"
 	depends on CONSOLE_RECORD
-	default 0x400 if CONSOLE_RECORD
+	default 0x400 if CONSOLE_RECORD && !ARCH_ROCKCHIP
+	default 0x2000 if CONSOLE_RECORD && ARCH_ROCKCHIP
 	help
 	  Set the size of the console output buffer. When this fills up, no
 	  more data will be recorded until some is removed. The buffer is
@@ -238,10 +255,42 @@ config CONSOLE_RECORD_IN_SIZE
 	  The buffer is allocated immediately after the malloc() region is
 	  ready.
 
+config CONSOLE_DISABLE_CLI
+	bool "disable ctrlc"
+	default n
+	help
+	  This disable CLI interactive in verified-boot.
+
+config DISABLE_CONSOLE
+	bool "disable console in & out"
+	help
+	 This disable console in & out.
+
 config IDENT_STRING
 	string "Board specific string to be added to uboot version string"
 	help
 	  This options adds the board specific name to u-boot version.
+
+config LOGLEVEL
+	int "loglevel"
+	default 4
+	range 0 8
+	help
+	  All Messages with a loglevel smaller than the console loglevel will
+	  be compiled in. The loglevels are defined as follows:
+
+	  0 (KERN_EMERG)          system is unusable
+	  1 (KERN_ALERT)          action must be taken immediately
+	  2 (KERN_CRIT)           critical conditions
+	  3 (KERN_ERR)            error conditions
+	  4 (KERN_WARNING)        warning conditions
+	  5 (KERN_NOTICE)         normal but significant condition
+	  6 (KERN_INFO)           informational
+	  7 (KERN_DEBUG)          debug-level messages
+
+config SPL_LOGLEVEL
+	int
+	default LOGLEVEL
 
 config SILENT_CONSOLE
 	bool "Support a silent console"
@@ -384,21 +433,91 @@ config SYS_STDIO_DEREGISTER
 
 endmenu
 
-config DTB_RESELECT
-	bool "Support swapping dtbs at a later point in boot"
-	depends on FIT_EMBED
-	help
-	  It is possible during initial boot you may need to use a generic
-	  dtb until you can fully determine the board your running on. This
-	  config allows boards to implement a function at a later point
-	  during boot to switch to the "correct" dtb.
+menu "Logging"
 
-config FIT_EMBED
-	bool "Support a FIT image embedded in the U-boot image"
+config LOG
+	bool "Enable logging support"
 	help
-	  This option provides hooks to allow U-boot to parse an
-	  appended FIT image and enable board specific code to then select
-	  the correct DTB to be used.
+	  This enables support for logging of status and debug messages. These
+	  can be displayed on the console, recorded in a memory buffer, or
+	  discarded if not needed. Logging supports various categories and
+	  levels of severity.
+
+config SPL_LOG
+	bool "Enable logging support in SPL"
+	help
+	  This enables support for logging of status and debug messages. These
+	  can be displayed on the console, recorded in a memory buffer, or
+	  discarded if not needed. Logging supports various categories and
+	  levels of severity.
+
+config LOG_MAX_LEVEL
+	int "Maximum log level to record"
+	depends on LOG
+	default 5
+	help
+	  This selects the maximum log level that will be recorded. Any value
+	  higher than this will be ignored. If possible log statements below
+	  this level will be discarded at build time. Levels:
+
+	    0 - panic
+	    1 - critical
+	    2 - error
+	    3 - warning
+	    4 - note
+	    5 - info
+	    6 - detail
+	    7 - debug
+
+config SPL_LOG_MAX_LEVEL
+	int "Maximum log level to record in SPL"
+	depends on SPL_LOG
+	default 3
+	help
+	  This selects the maximum log level that will be recorded. Any value
+	  higher than this will be ignored. If possible log statements below
+	  this level will be discarded at build time. Levels:
+
+	    0 - panic
+	    1 - critical
+	    2 - error
+	    3 - warning
+	    4 - note
+	    5 - info
+	    6 - detail
+	    7 - debug
+
+config LOG_CONSOLE
+	bool "Allow log output to the console"
+	depends on LOG
+	default y
+	help
+	  Enables a log driver which writes log records to the console.
+	  Generally the console is the serial port or LCD display. Only the
+	  log message is shown - other details like level, category, file and
+	  line number are omitted.
+
+config LOG_SPL_CONSOLE
+	bool "Allow log output to the console in SPL"
+	depends on LOG_SPL
+	default y
+	help
+	  Enables a log driver which writes log records to the console.
+	  Generally the console is the serial port or LCD display. Only the
+	  log message is shown - other details like level, category, file and
+	  line number are omitted.
+
+config LOG_TEST
+	bool "Provide a test for logging"
+	depends on LOG
+	default y if SANDBOX
+	help
+	  This enables a 'log test' command to test logging. It is normally
+	  executed from a pytest and simply outputs logging information
+	  in various different ways to test that the logging system works
+	  correctly with varoius settings.
+
+endmenu
 
 config DEFAULT_FDT_FILE
 	string "Default fdt file"
@@ -468,7 +587,88 @@ config BOARD_EARLY_INIT_F
 	  Note that the normal serial console is not yet set up, but the
 	  debug UART will be available if enabled.
 
+config BOARD_EARLY_INIT_R
+	bool "Call board-specific init after relocation"
+	help
+	  Some boards need to perform initialisation as directly after
+	  relocation. With this option, U-Boot calls board_early_init_r()
+	  in the post-relocation init sequence.
+
 endmenu
+
+menu "Android features support"
+config ANDROID_BOOTLOADER
+	bool "Support for Android Bootloader boot flow"
+	default n
+	depends on ANDROID_BOOT_IMAGE
+	help
+	  If enabled, adds support to boot an Android device following the
+	  Android Bootloader boot flow. This flow requires an Android Bootloader
+	  to handle the Android Bootloader Message stored in the Boot Control
+	  Block (BCB), normally in the "misc" partition of an Android device.
+	  The BCB is used to determine the boot mode of the device (normal mode,
+	  recovery mode or bootloader mode) and, if enabled, the slot to boot
+	  from in devices with multiple boot slots (A/B devices).
+
+config ANDROID_AB
+	bool "Support for Android A/B updates"
+	default n
+	help
+	  If enabled, adds support for the new Android A/B update model. This
+	  allows the bootloader to select which slot to boot from based on the
+	  information provided by userspace via the Android boot_ctrl HAL. This
+	  allows a bootloader to try a new version of the system but roll back
+	  to previous version if the new one didn't boot all the way.
+
+config ANDROID_WRITE_KEYBOX
+	bool "Support Write Keybox"
+	default y
+	depends on OPTEE_CLIENT
+	help
+	  This enable support write keybox to secure storage.
+
+config ANDROID_AVB
+	bool"Support Android Verified Boot"
+	default n
+	help
+	  If enabled, adds support the android verified boot. The avb get the
+	  digital signature and key from vemeta. Then use the RSA2048 and sha256
+	  to verify the boot images. The vbmeta must be matched with images,
+	  if not, verify failed.
+
+config ANDROID_AVB_ROLLBACK_INDEX
+	bool"Support Android Verified Boot Rollback Index"
+	default n
+	help
+	  If enabled, support the android verified boot rollback index.
+
+config ANDROID_KEYMASTER_CA
+	bool "Support Keymaster CA"
+	default y
+	depends on OPTEE_CLIENT
+	help
+	 This enable support read/write data in keymaster.
+
+config ANDROID_BOOT_IMAGE
+	bool "Enable support for Android Boot Images"
+	help
+	  This enables support for booting images which use the Android
+	  image format header.
+
+config ANDROID_BOOT_IMAGE_HASH
+	bool "Enable support for Android image hash verify"
+	depends on ANDROID_BOOT_IMAGE
+	select SHA1 if !DM_CRYPTO
+	help
+	  This enables support for Android image hash verify, the mkbootimg always use
+	  SHA1 for images.
+endmenu
+
+config SKIP_RELOCATE_UBOOT
+	bool "Skip U-Boot relocation"
+	default y if !ARM64 && !ARM64_BOOT_AARCH32
+	help
+	  This enable support for skipping U-Boot relocation.
 
 menu "Security support"
 
@@ -483,3 +683,4 @@ config HASH
 endmenu
 
 source "common/spl/Kconfig"
+source "common/usbplug/Kconfig"

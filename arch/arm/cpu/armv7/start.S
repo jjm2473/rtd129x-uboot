@@ -31,9 +31,12 @@
 
 	.globl	reset
 	.globl	save_boot_params_ret
+	.type   save_boot_params_ret,%function
 #ifdef CONFIG_ARMV7_LPAE
 	.global	switch_to_hypervisor_ret
 #endif
+
+#if !CONFIG_IS_ENABLED(TINY_FRAMEWORK)
 
 reset:
 	/* Allow the board to save important registers */
@@ -61,6 +64,11 @@ switch_to_hypervisor_ret:
 	orr	r0, r0, #0xc0		@ disable FIQ and IRQ
 	msr	cpsr,r0
 
+	/* Enable ACTLR.SMP bit */
+	mrc	p15, 0, r0, c1, c0, 1
+	orr	r0, r0, #(1 << 6)	@ Enable ACTLR.SMP bit
+	mcr	p15, 0, r0, c1, c0, 1
+
 /*
  * Setup vector:
  * (OMAP4 spl TEXT_BASE is not 32 byte aligned.
@@ -76,6 +84,11 @@ switch_to_hypervisor_ret:
 	ldr	r0, =_start
 	mcr	p15, 0, r0, c12, c0, 0	@Set VBAR
 #endif
+
+	/* Enable Asynchronous external abort after vectors setup */
+	mrs	r0, cpsr
+	bic	r0, r0, #0x100		@ CPSR.A bit
+	msr	cpsr_x,r0
 
 	/* the mask ROM code should have PLL and others stable */
 #ifndef CONFIG_SKIP_LOWLEVEL_INIT
@@ -102,6 +115,8 @@ ENTRY(c_runtime_cpu_setup)
 	bx	lr
 
 ENDPROC(c_runtime_cpu_setup)
+
+#endif/* !CONFIG_IS_ENABLED(TINY_FRAMEWORK) */
 
 /*************************************************************************
  *
@@ -299,6 +314,37 @@ skip_errata_725233:
 	mrc	p15, 0, r0, c15, c0, 1	@ read diagnostic register
 	orr	r0, r0, #1 << 12	@ set bit #12
 	mcr	p15, 0, r0, c15, c0, 1	@ write diagnostic register
+#endif
+
+#if defined(CONFIG_ARM_ZERO_CNTVOFF) && defined(CONFIG_SPL_BUILD)
+	/*
+	 * CNTVOFF usage constraints:
+	 * Only accessible from Hyp mode, or from Monitor mode when SCR.NS is
+	 * set to 1.
+	 */
+	/* switch to MON */
+	cps #22
+	isb
+
+	/* Update SCR.NS to non Secure mode */
+	mrc	p15, 0, r0, c1, c1, 0
+	orr r0, r0, #(1 << 0)
+	mcr	p15, 0, r0, c1, c1, 0
+	isb
+
+	/* set vtimer virtual offset 0 */
+	mov	r0, #0
+	mcrr	p15, 4, r0, r0, c14	@ CNTVOFF
+
+	/* Update SCR.NS to Secure mode */
+	mrc	p15, 0, r0, c1, c1, 0
+	bic r0, r0, #(1 << 0)
+	mcr	p15, 0, r0, c1, c1, 0
+	isb
+
+	/* switch back to SVC */
+	cps #19
+	isb
 #endif
 
 	mov	pc, r5			@ back to my caller

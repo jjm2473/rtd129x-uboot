@@ -22,7 +22,7 @@
 #include <asm/cache.h>
 #include <linux/errno.h>
 
-#include "xhci.h"
+#include <usb/xhci.h>
 
 #define CACHELINE_SIZE		CONFIG_SYS_CACHELINE_SIZE
 /**
@@ -369,6 +369,9 @@ static int xhci_scratchpad_alloc(struct xhci_ctrl *ctrl)
 		goto fail_sp2;
 	ctrl->dcbaa->dev_context_ptrs[0] =
 		cpu_to_le64((uintptr_t)scratchpad->sp_array);
+
+	xhci_flush_cache((uintptr_t)&ctrl->dcbaa->dev_context_ptrs[0],
+		sizeof(ctrl->dcbaa->dev_context_ptrs[0]));
 
 	page_size = xhci_readl(&hcor->or_pagesize) & 0xffff;
 	for (i = 0; i < 16; i++) {
@@ -724,7 +727,7 @@ void xhci_setup_addressable_virt_dev(struct xhci_ctrl *ctrl,
 	int slot_id = udev->slot_id;
 	int speed = udev->speed;
 	int route = 0;
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 	struct usb_device *dev = udev;
 	struct usb_hub_device *hub;
 #endif
@@ -740,7 +743,7 @@ void xhci_setup_addressable_virt_dev(struct xhci_ctrl *ctrl,
 	/* Only the control endpoint is valid - one endpoint context */
 	slot_ctx->dev_info |= cpu_to_le32(LAST_CTX(1));
 
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 	/* Calculate the route string for this device */
 	port_num = dev->portnr;
 	while (!usb_hub_is_root_hub(dev->dev)) {
@@ -783,15 +786,25 @@ void xhci_setup_addressable_virt_dev(struct xhci_ctrl *ctrl,
 		BUG();
 	}
 
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 	/* Set up TT fields to support FS/LS devices */
 	if (speed == USB_SPEED_LOW || speed == USB_SPEED_FULL) {
-		dev = dev_get_parent_priv(udev->dev);
-		if (dev->speed == USB_SPEED_HIGH) {
-			hub = dev_get_uclass_priv(udev->dev);
+		struct udevice *parent = udev->dev;
+
+		dev = udev;
+		do {
+			port_num = dev->portnr;
+			dev = dev_get_parent_priv(parent);
+			if (usb_hub_is_root_hub(dev->dev))
+				break;
+			parent = dev->dev->parent;
+		} while (dev->speed != USB_SPEED_HIGH);
+
+		if (!usb_hub_is_root_hub(dev->dev)) {
+			hub = dev_get_uclass_priv(dev->dev);
 			if (hub->tt.multi)
 				slot_ctx->dev_info |= cpu_to_le32(DEV_MTT);
-			slot_ctx->tt_info |= cpu_to_le32(TT_PORT(udev->portnr));
+			slot_ctx->tt_info |= cpu_to_le32(TT_PORT(port_num));
 			slot_ctx->tt_info |= cpu_to_le32(TT_SLOT(dev->slot_id));
 		}
 	}
@@ -839,6 +852,12 @@ void xhci_setup_addressable_virt_dev(struct xhci_ctrl *ctrl,
 
 	trb_64 = (uintptr_t)virt_dev->eps[0].ring->first_seg->trbs;
 	ep0_ctx->deq = cpu_to_le64(trb_64 | virt_dev->eps[0].ring->cycle_state);
+
+	/*
+	 * xHCI spec 6.2.3:
+	 * software shall set 'Average TRB Length' to 8 for control endpoints.
+	 */
+	ep0_ctx->tx_info = cpu_to_le32(EP_AVG_TRB_LENGTH(8));
 
 	/* Steps 7 and 8 were done in xhci_alloc_virt_device() */
 

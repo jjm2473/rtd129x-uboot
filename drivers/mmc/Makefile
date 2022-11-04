@@ -7,6 +7,7 @@
 
 obj-y += mmc.o
 obj-$(CONFIG_$(SPL_)DM_MMC) += mmc-uclass.o
+obj-$(CONFIG_$(SPL_)MMC_WRITE) += mmc_write.o
 
 ifndef CONFIG_$(SPL_)BLK
 obj-y += mmc_legacy.o
@@ -16,9 +17,6 @@ obj-$(CONFIG_SUPPORT_EMMC_BOOT) += mmc_boot.o
 
 ifdef CONFIG_SPL_BUILD
 obj-$(CONFIG_SPL_MMC_BOOT) += fsl_esdhc_spl.o
-obj-$(CONFIG_SPL_SAVEENV) += mmc_write.o
-else
-obj-y += mmc_write.o
 endif
 
 obj-$(CONFIG_ARM_PL180_MMCI) += arm_pl180_mmci.o
@@ -48,6 +46,7 @@ obj-$(CONFIG_SH_SDHI) += sh_sdhi.o
 obj-$(CONFIG_MMC_SDHCI)			+= sdhci.o
 obj-$(CONFIG_MMC_SDHCI_ATMEL)		+= atmel_sdhci.o
 obj-$(CONFIG_MMC_SDHCI_BCM2835)		+= bcm2835_sdhci.o
+obj-$(CONFIG_MMC_SDHCI_BCMSTB)		+= bcmstb_sdhci.o
 obj-$(CONFIG_MMC_SDHCI_CADENCE)		+= sdhci-cadence.o
 obj-$(CONFIG_MMC_SDHCI_KONA)		+= kona_sdhci.o
 obj-$(CONFIG_MMC_SDHCI_MSM)		+= msm_sdhci.o

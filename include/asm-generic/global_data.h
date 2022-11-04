@@ -24,6 +24,21 @@
 #include <membuff.h>
 #include <linux/list.h>
 
+/* Never change the sequence of members !!! */
+struct pm_ctx {
+	unsigned long sp;
+	phys_addr_t cpu_resume_addr;
+	unsigned long suspend_regs[15];
+};
+
+struct pre_serial {
+	u32 using_pre_serial;
+	u32 enable;
+	u32 id;
+	u32 baudrate;
+	ulong addr;
+};
+
 typedef struct global_data {
 	bd_t *bd;
 	unsigned long flags;
@@ -36,7 +51,7 @@ typedef struct global_data {
 #if defined(CONFIG_LCD) || defined(CONFIG_VIDEO)
 	unsigned long fb_base;		/* Base address of framebuffer mem */
 #endif
-#if defined(CONFIG_POST) || defined(CONFIG_LOGBUFFER)
+#if defined(CONFIG_POST)
 	unsigned long post_log_word;	/* Record POST activities */
 	unsigned long post_log_res;	/* success of POST test */
 	unsigned long post_init_f_time;	/* When post_init_f started */
@@ -52,6 +67,7 @@ typedef struct global_data {
 	unsigned long env_valid;	/* Environment valid? enum env_valid */
 
 	unsigned long ram_top;		/* Top address of RAM used by U-Boot */
+	unsigned long ram_top_ext_size;	/* Extend size of RAM top */
 	unsigned long relocaddr;	/* Start address of U-Boot in RAM */
 	phys_size_t ram_size;		/* RAM size */
 	unsigned long mon_len;		/* monitor len */
@@ -68,13 +84,15 @@ typedef struct global_data {
 #ifdef CONFIG_TIMER
 	struct udevice	*timer;		/* Timer instance for Driver Model */
 #endif
-
 	const void *fdt_blob;		/* Our device tree, NULL if none */
 	void *new_fdt;			/* Relocated FDT */
 	unsigned long fdt_size;		/* Space reserved for relocated FDT */
 #ifdef CONFIG_OF_LIVE
 	struct device_node *of_root;
+	struct device_node *of_root_f;  /* U-Boot of-root instance */
 #endif
+	const void *ufdt_blob;		/* Our U-Boot device tree, NULL if none */
+	const void *fdt_blob_kern;	/* Kernel dtb at the tail of u-boot.bin */
 	struct jt_funcs *jt;		/* jump table */
 	char env_buf[32];		/* buffer for env_get() before reloc. */
 #ifdef CONFIG_TRACE
@@ -114,6 +132,22 @@ typedef struct global_data {
 	struct bootstage_data *bootstage;	/* Bootstage information */
 	struct bootstage_data *new_bootstage;	/* Relocated bootstage info */
 #endif
+	phys_addr_t pm_ctx_phys;
+
+#ifdef CONFIG_BOOTSTAGE_PRINTF_TIMESTAMP
+	int new_line;
+#endif
+	struct pre_serial serial;
+	ulong sys_start_tick;		/* For report system start-up time */
+	int console_evt;		/* Console event, maybe some hotkey  */
+#ifdef CONFIG_LOG
+	int log_drop_count;		/* Number of dropped log messages */
+	int default_log_level;		/* For devices with no filters */
+	struct list_head log_head;	/* List of struct log_device */
+#endif
+#if CONFIG_IS_ENABLED(FIT_ROLLBACK_PROTECT)
+	u32 rollback_index;
+#endif
 } gd_t;
 #endif
 
@@ -141,5 +175,12 @@ typedef struct global_data {
 #define GD_FLG_RECORD		0x01000	/* Record console		   */
 #define GD_FLG_ENV_DEFAULT	0x02000 /* Default variable flag	   */
 #define GD_FLG_SPL_EARLY_INIT	0x04000 /* Early SPL init is done	   */
+#define GD_FLG_LOG_READY	0x08000 /* Log system is ready for use	   */
+#define GD_FLG_KDTB_READY	0x10000 /* Kernel dtb is ready for use	   */
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+/* BL32 is enabled */
+#define GD_FLG_BL32_ENABLED	0x20000
+#endif
 
 #endif /* __ASM_GENERIC_GBL_DATA_H */

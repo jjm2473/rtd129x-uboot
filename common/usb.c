@@ -43,7 +43,7 @@
 static int asynch_allowed;
 char usb_started; /* flag for the started/stopped USB status */
 
-#ifndef CONFIG_DM_USB
+#if !CONFIG_IS_ENABLED(DM_USB)
 static struct usb_device usb_dev[USB_MAX_DEVICE];
 static int dev_index;
 
@@ -184,7 +184,7 @@ int usb_disable_asynch(int disable)
 	asynch_allowed = !disable;
 	return old_value;
 }
-#endif /* !CONFIG_DM_USB */
+#endif /* !CONFIG_IS_ENABLED(DM_USB) */
 
 
 /*-------------------------------------------------------------------
@@ -193,12 +193,15 @@ int usb_disable_asynch(int disable)
  */
 
 /*
- * submits an Interrupt Message
+ * submits an Interrupt Message. Some drivers may implement non-blocking
+ * polling: when non-block is true and the device is not responding return
+ * -EAGAIN instead of waiting for device to respond.
  */
-int usb_submit_int_msg(struct usb_device *dev, unsigned long pipe,
-			void *buffer, int transfer_len, int interval)
+int usb_int_msg(struct usb_device *dev, unsigned long pipe,
+		void *buffer, int transfer_len, int interval, bool nonblock)
 {
-	return submit_int_msg(dev, pipe, buffer, transfer_len, interval);
+	return submit_int_msg(dev, pipe, buffer, transfer_len, interval,
+			      nonblock);
 }
 
 /*
@@ -252,6 +255,9 @@ int usb_control_msg(struct usb_device *dev, unsigned int pipe,
 	}
 	if (dev->status)
 		return -1;
+
+	if(dev->descriptor.idVendor == 0x058f && dev->descriptor.idProduct == 0x6387)
+		udelay(200);
 
 	return dev->act_len;
 
@@ -513,6 +519,20 @@ static int usb_parse_config(struct usb_device *dev,
 		}
 		index += head->bLength;
 		head = (struct usb_descriptor_header *)&buffer[index];
+	}
+
+	/**
+	 * Some odd devices respond the Endpoint descriptor items are less
+	 * then the bNumEndpoints in Interface descriptor, so fix it here.
+	 */
+	for (ifno = 0; ifno < dev->config.no_of_if; ifno++) {
+		if_desc = &dev->config.if_desc[ifno];
+		if (if_desc->desc.bNumEndpoints != if_desc->no_of_ep) {
+			printf("WARN: interface %d has %d endpoint descriptor, "
+			       "different from the interface descriptor's value: %d\n",
+			       ifno, if_desc->no_of_ep, if_desc->desc.bNumEndpoints);
+			if_desc->desc.bNumEndpoints = if_desc->no_of_ep;
+		}
 	}
 	return 0;
 }
@@ -849,7 +869,7 @@ int usb_string(struct usb_device *dev, int index, char *buf, size_t size)
  * the USB device are static allocated [USB_MAX_DEVICE].
  */
 
-#ifndef CONFIG_DM_USB
+#if !CONFIG_IS_ENABLED(DM_USB)
 
 /* returns a pointer to the device with the index [index].
  * if the device is not assigned (dev->devnum==-1) returns NULL
@@ -906,7 +926,7 @@ __weak int usb_alloc_device(struct usb_device *udev)
 {
 	return 0;
 }
-#endif /* !CONFIG_DM_USB */
+#endif /* !CONFIG_IS_ENABLED(DM_USB) */
 
 static int usb_hub_port_reset(struct usb_device *dev, struct usb_device *hub)
 {
@@ -969,23 +989,24 @@ static int usb_setup_descriptor(struct usb_device *dev, bool do_read)
 	dev->epmaxpacketin[0] = dev->descriptor.bMaxPacketSize0;
 	dev->epmaxpacketout[0] = dev->descriptor.bMaxPacketSize0;
 
-	if (do_read) {
+	if (do_read && dev->speed == USB_SPEED_FULL) {
 		int err;
 
 		/*
-		 * Validate we've received only at least 8 bytes, not that we've
-		 * received the entire descriptor. The reasoning is:
-		 * - The code only uses fields in the first 8 bytes, so that's all we
-		 *   need to have fetched at this stage.
-		 * - The smallest maxpacket size is 8 bytes. Before we know the actual
-		 *   maxpacket the device uses, the USB controller may only accept a
-		 *   single packet. Consequently we are only guaranteed to receive 1
-		 *   packet (at least 8 bytes) even in a non-error case.
+		 * Validate we've received only at least 8 bytes, not that
+		 * we've received the entire descriptor. The reasoning is:
+		 * - The code only uses fields in the first 8 bytes, so
+		 *   that's all we need to have fetched at this stage.
+		 * - The smallest maxpacket size is 8 bytes. Before we know
+		 *   the actual maxpacket the device uses, the USB controller
+		 *   may only accept a single packet. Consequently we are only
+		 *   guaranteed to receive 1 packet (at least 8 bytes) even in
+		 *   a non-error case.
 		 *
-		 * At least the DWC2 controller needs to be programmed with the number
-		 * of packets in addition to the number of bytes. A request for 64
-		 * bytes of data with the maxpacket guessed as 64 (above) yields a
-		 * request for 1 packet.
+		 * At least the DWC2 controller needs to be programmed with
+		 * the number of packets in addition to the number of bytes.
+		 * A request for 64 bytes of data with the maxpacket guessed
+		 * as 64 (above) yields a request for 1 packet.
 		 */
 		err = get_descriptor_len(dev, 64, 8);
 		if (err)
@@ -1008,7 +1029,7 @@ static int usb_setup_descriptor(struct usb_device *dev, bool do_read)
 		dev->maxpacketsize = PACKET_SIZE_64;
 		break;
 	default:
-		printf("usb_new_device: invalid max packet size\n");
+		printf("%s: invalid max packet size\n", __func__);
 		return -EIO;
 	}
 
@@ -1049,6 +1070,17 @@ static int usb_prepare_device(struct usb_device *dev, int addr, bool do_read,
 	}
 
 	mdelay(10);	/* Let the SET_ADDRESS settle */
+
+	/*
+	 * If we haven't read device descriptor before, read it here
+	 * after device is assigned an address. This is only applicable
+	 * to xHCI so far.
+	 */
+	if (!do_read) {
+		err = usb_setup_descriptor(dev, true);
+		if (err)
+			return err;
+	}
 
 	return 0;
 }
@@ -1154,7 +1186,7 @@ int usb_setup_device(struct usb_device *dev, bool do_read,
 	return ret;
 }
 
-#ifndef CONFIG_DM_USB
+#if !CONFIG_IS_ENABLED(DM_USB)
 /*
  * By the time we get here, the device has gotten a new device ID
  * and is in the default state. We need to identify the thing and
@@ -1203,14 +1235,14 @@ int board_usb_cleanup(int index, enum usb_init_type init)
 
 bool usb_device_has_child_on_port(struct usb_device *parent, int port)
 {
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 	return false;
 #else
 	return parent->children[port] != NULL;
 #endif
 }
 
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 void usb_find_usb2_hub_address_port(struct usb_device *udev,
 			       uint8_t *hub_address, uint8_t *hub_port)
 {

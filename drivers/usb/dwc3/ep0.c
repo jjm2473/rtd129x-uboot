@@ -13,7 +13,7 @@
  *
  * SPDX-License-Identifier:     GPL-2.0
  */
-
+#include <common.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 
@@ -217,7 +217,7 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 	struct dwc3_ep			*dep = to_dwc3_ep(ep);
 	struct dwc3			*dwc = dep->dwc;
 
-	unsigned long			flags;
+	unsigned long			flags = 0;
 
 	int				ret;
 
@@ -284,7 +284,7 @@ int __dwc3_gadget_ep0_set_halt(struct usb_ep *ep, int value)
 
 int dwc3_gadget_ep0_set_halt(struct usb_ep *ep, int value)
 {
-	unsigned long			flags;
+	unsigned long			flags = 0;
 	int				ret;
 
 	spin_lock_irqsave(&dwc->lock, flags);
@@ -417,7 +417,7 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 				return -EINVAL;
 
 			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			if (set)
+			if (set && !dwc->dis_u1u2_quirk)
 				reg |= DWC3_DCTL_INITU1ENA;
 			else
 				reg &= ~DWC3_DCTL_INITU1ENA;
@@ -431,7 +431,7 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 				return -EINVAL;
 
 			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			if (set)
+			if (set && !dwc->dis_u1u2_quirk)
 				reg |= DWC3_DCTL_INITU2ENA;
 			else
 				reg &= ~DWC3_DCTL_INITU2ENA;
@@ -568,7 +568,10 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 			 * nothing is pending from application.
 			 */
 			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			reg |= (DWC3_DCTL_ACCEPTU1ENA | DWC3_DCTL_ACCEPTU2ENA);
+			if (dwc->dis_u1u2_quirk)
+				reg &= ~(DWC3_DCTL_ACCEPTU1ENA | DWC3_DCTL_ACCEPTU2ENA);
+			else
+				reg |= (DWC3_DCTL_ACCEPTU1ENA | DWC3_DCTL_ACCEPTU2ENA);
 			dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
 			dwc->resize_fifos = true;

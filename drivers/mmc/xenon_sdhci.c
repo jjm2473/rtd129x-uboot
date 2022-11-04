@@ -18,7 +18,7 @@
 #include <common.h>
 #include <dm.h>
 #include <fdtdec.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <malloc.h>
 #include <sdhci.h>
 
@@ -94,18 +94,6 @@ DECLARE_GLOBAL_DATA_PTR;
 /* Hyperion only have one slot 0 */
 #define XENON_MMC_SLOT_ID_HYPERION		0
 
-#define MMC_TIMING_LEGACY	0
-#define MMC_TIMING_MMC_HS	1
-#define MMC_TIMING_SD_HS	2
-#define MMC_TIMING_UHS_SDR12	3
-#define MMC_TIMING_UHS_SDR25	4
-#define MMC_TIMING_UHS_SDR50	5
-#define MMC_TIMING_UHS_SDR104	6
-#define MMC_TIMING_UHS_DDR50	7
-#define MMC_TIMING_MMC_DDR52	8
-#define MMC_TIMING_MMC_HS200	9
-#define MMC_TIMING_MMC_HS400	10
-
 #define XENON_MMC_MAX_CLK	400000000
 
 enum soc_pad_ctrl_type {
@@ -159,7 +147,7 @@ static int xenon_mmc_phy_init(struct sdhci_host *host)
 	}
 
 	if (time <= 0) {
-		error("Failed to enable MMC internal clock in time\n");
+		pr_err("Failed to enable MMC internal clock in time\n");
 		return -ETIMEDOUT;
 	}
 
@@ -187,7 +175,7 @@ static int xenon_mmc_phy_init(struct sdhci_host *host)
 	}
 
 	if (time <= 0) {
-		error("Failed to init MMC PHY in time\n");
+		pr_err("Failed to init MMC PHY in time\n");
 		return -ETIMEDOUT;
 	}
 
@@ -249,7 +237,7 @@ static void xenon_mmc_phy_set(struct sdhci_host *host)
 	sdhci_writew(host, var, SDHCI_CLOCK_CONTROL);
 
 	var = sdhci_readl(host, EMMC_PHY_FUNC_CONTROL);
-	if (host->mmc->ddr_mode) {
+	if (mmc_card_ddr(host->mmc)) {
 		var |= (DQ_DDR_MODE_MASK << DQ_DDR_MODE_SHIFT) | CMD_DDR_MODE;
 	} else {
 		var &= ~((DQ_DDR_MODE_MASK << DQ_DDR_MODE_SHIFT) |
@@ -330,7 +318,7 @@ static void xenon_mask_cmd_conflict_err(struct sdhci_host *host)
 static void xenon_sdhci_set_ios_post(struct sdhci_host *host)
 {
 	struct xenon_sdhci_priv *priv = host->mmc->priv;
-	uint speed = host->mmc->tran_speed;
+	uint speed = host->mmc->clock;
 	int pwr_18v = 0;
 
 	if ((sdhci_readb(host, SDHCI_POWER_CONTROL) & ~SDHCI_POWER_ON) ==
@@ -341,7 +329,7 @@ static void xenon_sdhci_set_ios_post(struct sdhci_host *host)
 	if (IS_SD(host->mmc)) {
 		/* SD/SDIO */
 		if (pwr_18v) {
-			if (host->mmc->ddr_mode)
+			if (mmc_card_ddr(host->mmc))
 				priv->timing = MMC_TIMING_UHS_DDR50;
 			else if (speed <= 25000000)
 				priv->timing = MMC_TIMING_UHS_SDR25;
@@ -355,7 +343,7 @@ static void xenon_sdhci_set_ios_post(struct sdhci_host *host)
 		}
 	} else {
 		/* eMMC */
-		if (host->mmc->ddr_mode)
+		if (mmc_card_ddr(host->mmc))
 			priv->timing = MMC_TIMING_MMC_DDR52;
 		else if (speed <= 26000000)
 			priv->timing = MMC_TIMING_LEGACY;

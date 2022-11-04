@@ -6,22 +6,11 @@
 
 #include <common.h>
 #include <dm/util.h>
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <vsprintf.h>
 
 #ifdef CONFIG_DM_WARN
 void dm_warn(const char *fmt, ...)
-{
-	va_list args;
-
-	va_start(args, fmt);
-	vprintf(fmt, args);
-	va_end(args);
-}
-#endif
-
-#ifdef DEBUG
-void dm_dbg(const char *fmt, ...)
 {
 	va_list args;
 

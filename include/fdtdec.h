@@ -14,7 +14,7 @@
  * changes to support FDT are minimized.
  */
 
-#include <libfdt.h>
+#include <linux/libfdt.h>
 #include <pci.h>
 
 /*
@@ -27,10 +27,12 @@ typedef phys_size_t fdt_size_t;
 #define FDT_ADDR_T_NONE (-1ULL)
 #define fdt_addr_to_cpu(reg) be64_to_cpu(reg)
 #define fdt_size_to_cpu(reg) be64_to_cpu(reg)
+typedef fdt64_t fdt_val_t;
 #else
 #define FDT_ADDR_T_NONE (-1U)
 #define fdt_addr_to_cpu(reg) be32_to_cpu(reg)
 #define fdt_size_to_cpu(reg) be32_to_cpu(reg)
+typedef fdt32_t fdt_val_t;
 #endif
 
 /* Information obtained about memory from the FDT */
@@ -43,6 +45,10 @@ struct fdt_memory {
 #define SPL_BUILD	1
 #else
 #define SPL_BUILD	0
+#endif
+
+#if CONFIG_IS_ENABLED(OF_PRIOR_STAGE)
+extern phys_addr_t prior_stage_fdt_address;
 #endif
 
 /*
@@ -157,6 +163,7 @@ enum fdt_compat_id {
 	COMPAT_ALTERA_SOCFPGA_F2SDR0,           /* SoCFPGA fpga2SDRAM0 bridge */
 	COMPAT_ALTERA_SOCFPGA_F2SDR1,           /* SoCFPGA fpga2SDRAM1 bridge */
 	COMPAT_ALTERA_SOCFPGA_F2SDR2,           /* SoCFPGA fpga2SDRAM2 bridge */
+	COMPAT_ROCKCHIP_NANDC,			/* Rockchip NAND controller */
 
 	COMPAT_COUNT,
 };

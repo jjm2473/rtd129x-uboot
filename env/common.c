@@ -41,6 +41,8 @@ int env_get_yesno(const char *var)
 		1 : 0;
 }
 
+__weak void board_env_fixup(void) {}
+
 /*
  * Look up the variable from the default environment
  */
@@ -84,10 +86,12 @@ void set_default_env(const char *s)
 	if (himport_r(&env_htab, (char *)default_environment,
 			sizeof(default_environment), '\0', flags, 0,
 			0, NULL) == 0)
-		error("Environment import failed: errno = %d\n", errno);
+		pr_err("Environment import failed: errno = %d\n", errno);
 
 	gd->flags |= GD_FLG_ENV_READY;
 	gd->flags |= GD_FLG_ENV_DEFAULT;
+
+	board_env_fixup();
 }
 
 
@@ -101,6 +105,22 @@ int set_default_vars(int nvars, char * const vars[])
 	return himport_r(&env_htab, (const char *)default_environment,
 				sizeof(default_environment), '\0',
 				H_NOCLEAR | H_INTERACTIVE, 0, nvars, vars);
+}
+
+int set_board_env(const char *vars, int size, int flags, bool ready)
+{
+	if (himport_r(&env_htab, (char *)vars, size, '\0',
+		      flags, 0, 0, NULL) == 0) {
+		pr_err("Environment import failed\n");
+		return -1;
+	}
+
+	if (ready) {
+		gd->flags |= GD_FLG_ENV_READY;
+		gd->flags |= GD_FLG_ENV_DEFAULT;
+	}
+
+	return 0;
 }
 
 #ifdef CONFIG_ENV_AES
@@ -172,7 +192,7 @@ int env_import(const char *buf, int check)
 	/* Decrypt the env if desired. */
 	ret = env_aes_cbc_crypt(ep, 0);
 	if (ret) {
-		error("Failed to decrypt env!\n");
+		pr_err("Failed to decrypt env!\n");
 		set_default_env("!import failed");
 		return ret;
 	}
@@ -183,7 +203,7 @@ int env_import(const char *buf, int check)
 		return 1;
 	}
 
-	error("Cannot import environment: errno = %d\n", errno);
+	pr_err("Cannot import environment: errno = %d\n", errno);
 
 	set_default_env("!import failed");
 
@@ -247,7 +267,7 @@ int env_export(env_t *env_out)
 	res = (char *)env_out->data;
 	len = hexport_r(&env_htab, '\0', 0, &res, ENV_SIZE, 0, NULL);
 	if (len < 0) {
-		error("Cannot export environment: errno = %d\n", errno);
+		pr_err("Cannot export environment: errno = %d\n", errno);
 		return 1;
 	}
 

@@ -98,18 +98,8 @@ struct us_data {
 	struct scsi_cmd	*srb;			/* current srb */
 	trans_reset	transport_reset;	/* reset routine */
 	trans_cmnd	transport;		/* transport routine */
+	unsigned short	max_xfer_blk;		/* maximum transfer blocks */
 };
-
-#ifdef CONFIG_USB_EHCI_HCD
-/*
- * The U-Boot EHCI driver can handle any transfer length as long as there is
- * enough free heap space left, but the SCSI READ(10) and WRITE(10) commands are
- * limited to 65535 blocks.
- */
-#define USB_MAX_XFER_BLK	65535
-#else
-#define USB_MAX_XFER_BLK	20
-#endif
 
 #ifndef CONFIG_BLK
 static struct us_data usb_stor[USB_MAX_STOR_DEV];
@@ -313,7 +303,7 @@ int usb_stor_scan(int mode)
 	if (mode == 1)
 		printf("       scanning usb for storage devices... ");
 
-#ifndef CONFIG_DM_USB
+#if !CONFIG_IS_ENABLED(DM_USB)
 	unsigned char i;
 
 	usb_disable_asynch(1); /* asynch transfer not allowed */
@@ -664,8 +654,8 @@ static int usb_stor_CBI_get_status(struct scsi_cmd *srb, struct us_data *us)
 	int timeout;
 
 	us->ip_wanted = 1;
-	submit_int_msg(us->pusb_dev, us->irqpipe,
-			(void *) &us->ip_data, us->irqmaxp, us->irqinterval);
+	usb_int_msg(us->pusb_dev, us->irqpipe,
+		    (void *)&us->ip_data, us->irqmaxp, us->irqinterval, false);
 	timeout = 1000;
 	while (timeout--) {
 		if (us->ip_wanted == 0)
@@ -949,6 +939,39 @@ do_retry:
 	return USB_STOR_TRANSPORT_FAILED;
 }
 
+static void usb_stor_set_max_xfer_blk(struct usb_device *udev,
+				      struct us_data *us)
+{
+	/*
+	 * Limit the total size of a transfer to 120 KB.
+	 *
+	 * Some devices are known to choke with anything larger. It seems like
+	 * the problem stems from the fact that original IDE controllers had
+	 * only an 8-bit register to hold the number of sectors in one transfer
+	 * and even those couldn't handle a full 256 sectors.
+	 *
+	 * Because we want to make sure we interoperate with as many devices as
+	 * possible, we will maintain a 240 sector transfer size limit for USB
+	 * Mass Storage devices.
+	 *
+	 * Tests show that other operating have similar limits with Microsoft
+	 * Windows 7 limiting transfers to 128 sectors for both USB2 and USB3
+	 * and Apple Mac OS X 10.11 limiting transfers to 256 sectors for USB2
+	 * and 2048 for USB3 devices.
+	 */
+	unsigned short blk = 240;
+
+#if CONFIG_IS_ENABLED(DM_USB)
+	size_t size;
+	int ret;
+
+	ret = usb_get_max_xfer_size(udev, (size_t *)&size);
+	if ((ret >= 0) && (size < blk * 512))
+		blk = size / 512;
+#endif
+
+	us->max_xfer_blk = blk;
+}
 
 static int usb_inquiry(struct scsi_cmd *srb, struct us_data *ss)
 {
@@ -1150,12 +1173,12 @@ static unsigned long usb_stor_read(struct blk_desc *block_dev, lbaint_t blknr,
 		/* XXX need some comment here */
 		retry = 2;
 		srb->pdata = (unsigned char *)buf_addr;
-		if (blks > USB_MAX_XFER_BLK)
-			smallblks = USB_MAX_XFER_BLK;
+		if (blks > ss->max_xfer_blk)
+			smallblks = ss->max_xfer_blk;
 		else
 			smallblks = (unsigned short) blks;
 retry_it:
-		if (smallblks == USB_MAX_XFER_BLK)
+		if (smallblks == ss->max_xfer_blk)
 			usb_show_progress();
 		srb->datalen = block_dev->blksz * smallblks;
 		srb->pdata = (unsigned char *)buf_addr;
@@ -1178,7 +1201,7 @@ retry_it:
 	      start, smallblks, buf_addr);
 
 	usb_disable_asynch(0); /* asynch transfer allowed */
-	if (blkcnt >= USB_MAX_XFER_BLK)
+	if (blkcnt >= ss->max_xfer_blk)
 		debug("\n");
 	return blkcnt;
 }
@@ -1236,12 +1259,12 @@ static unsigned long usb_stor_write(struct blk_desc *block_dev, lbaint_t blknr,
 		 */
 		retry = 2;
 		srb->pdata = (unsigned char *)buf_addr;
-		if (blks > USB_MAX_XFER_BLK)
-			smallblks = USB_MAX_XFER_BLK;
+		if (blks > ss->max_xfer_blk)
+			smallblks = ss->max_xfer_blk;
 		else
 			smallblks = (unsigned short) blks;
 retry_it:
-		if (smallblks == USB_MAX_XFER_BLK)
+		if (smallblks == ss->max_xfer_blk)
 			usb_show_progress();
 		srb->datalen = block_dev->blksz * smallblks;
 		srb->pdata = (unsigned char *)buf_addr;
@@ -1263,7 +1286,7 @@ retry_it:
 	      PRIxPTR "\n", start, smallblks, buf_addr);
 
 	usb_disable_asynch(0); /* asynch transfer allowed */
-	if (blkcnt >= USB_MAX_XFER_BLK)
+	if (blkcnt >= ss->max_xfer_blk)
 		debug("\n");
 	return blkcnt;
 
@@ -1384,6 +1407,10 @@ int usb_storage_probe(struct usb_device *dev, unsigned int ifnum,
 		ss->irqmaxp = usb_maxpacket(dev, ss->irqpipe);
 		dev->irq_handle = usb_stor_irq;
 	}
+
+	/* Set the maximum transfer size per host controller setting */
+	usb_stor_set_max_xfer_blk(dev, ss);
+
 	dev->privptr = (void *)ss;
 	return 1;
 }
@@ -1474,7 +1501,7 @@ int usb_stor_get_info(struct usb_device *dev, struct us_data *ss,
 	return 1;
 }
 
-#ifdef CONFIG_DM_USB
+#if CONFIG_IS_ENABLED(DM_USB)
 
 static int usb_mass_storage_probe(struct udevice *dev)
 {

@@ -31,9 +31,12 @@ OBJ-y += libgenwrap.o
 EXT_COBJ-y += lib/crc32.o
 EXT_COBJ-y += lib/ctype.o
 EXT_COBJ-y += lib/div64.o
+EXT_COBJ-y += lib/hexdump.o
 EXT_COBJ-y += lib/string.o
 EXT_COBJ-y += lib/time.o
 EXT_COBJ-y += lib/vsprintf.o
+EXT_COBJ-y += lib/charset.o
+EXT_COBJ-$(CONFIG_LIB_UUID) += lib/uuid.o
 EXT_SOBJ-$(CONFIG_PPC) += arch/powerpc/lib/ppcstring.o
 ifeq ($(ARCH),arm)
 EXT_SOBJ-$(CONFIG_USE_ARCH_MEMSET) += arch/arm/lib/memset.o

@@ -64,7 +64,14 @@ HAVE_VENDOR_COMMON_LIB = $(if $(wildcard $(srctree)/board/$(VENDOR)/common/Makef
 libs-y += $(if $(BOARDDIR),board/$(BOARDDIR)/)
 libs-$(HAVE_VENDOR_COMMON_LIB) += board/$(VENDOR)/common/
 
+ifeq ($(CONFIG_TPL_BUILD),y)
+ifndef CONFIG_TPL_TINY_FRAMEWORK
 libs-$(CONFIG_SPL_FRAMEWORK) += common/spl/
+endif
+else
+libs-$(CONFIG_SPL_FRAMEWORK) += common/spl/
+endif
+
 libs-y += common/init/
 
 # Special handling for a few options which support SPL/TPL
@@ -77,8 +84,11 @@ libs-$(CONFIG_SPL_LIBGENERIC_SUPPORT) += lib/
 endif
 
 libs-$(CONFIG_SPL_LIBDISK_SUPPORT) += disk/
+ifneq ($(CONFIG_SPL_DECOMP_HEADER),y)
 libs-y += drivers/
-libs-$(CONFIG_SPL_USB_GADGET_SUPPORT) += drivers/usb/dwc3/
+endif
+libs-$(CONFIG_SPL_USB_GADGET) += drivers/usb/dwc3/
+libs-$(CONFIG_SPL_USB_GADGET) += drivers/usb/cdns3/
 libs-y += dts/
 libs-y += fs/
 libs-$(CONFIG_SPL_POST_MEM_SUPPORT) += post/drivers/
@@ -167,7 +177,8 @@ ifdef CONFIG_ARCH_ZYNQ
 MKIMAGEFLAGS_boot.bin = -T zynqimage -R $(srctree)/$(CONFIG_BOOT_INIT_FILE)
 endif
 ifdef CONFIG_ARCH_ZYNQMP
-MKIMAGEFLAGS_boot.bin = -T zynqmpimage -R $(srctree)/$(CONFIG_BOOT_INIT_FILE)
+MKIMAGEFLAGS_boot.bin = -T zynqmpimage -R $(srctree)/$(CONFIG_BOOT_INIT_FILE) \
+	-n $(srctree)/$(CONFIG_PMUFW_INIT_FILE)
 endif
 
 spl/boot.bin: $(obj)/u-boot-spl.bin FORCE
@@ -209,10 +220,21 @@ cmd_cat = cat $(filter-out $(PHONY), $^) > $@
 quiet_cmd_copy = COPY    $@
       cmd_copy = cp $< $@
 
+ifneq ($(CONFIG_SPL_MULTI_DTB_FIT),y)
+FINAL_DTB_CONTAINER = $(obj)/$(SPL_BIN).dtb
+else ifeq ($(CONFIG_SPL_MULTI_DTB_FIT_LZO),y)
+FINAL_DTB_CONTAINER = $(obj)/$(SPL_BIN).multidtb.fit.lzo
+else ifeq ($(CONFIG_SPL_MULTI_DTB_FIT_GZIP),y)
+FINAL_DTB_CONTAINER = $(obj)/$(SPL_BIN).multidtb.fit.gz
+else
+FINAL_DTB_CONTAINER = $(obj)/$(SPL_BIN).multidtb.fit
+endif
+
+
 ifeq ($(CONFIG_$(SPL_TPL_)OF_CONTROL)$(CONFIG_OF_SEPARATE)$(CONFIG_$(SPL_TPL_)OF_PLATDATA),yy)
 $(obj)/$(SPL_BIN)-dtb.bin: $(obj)/$(SPL_BIN)-nodtb.bin \
 		$(if $(CONFIG_SPL_SEPARATE_BSS),,$(obj)/$(SPL_BIN)-pad.bin) \
-		$(obj)/$(SPL_BIN).dtb FORCE
+		$(FINAL_DTB_CONTAINER)  FORCE
 	$(call if_changed,cat)
 
 $(obj)/$(SPL_BIN).bin: $(obj)/$(SPL_BIN)-dtb.bin FORCE
@@ -227,26 +249,15 @@ $(obj)/$(SPL_BIN)-pad.bin: $(obj)/$(SPL_BIN)
 	@bss_size_str=$(shell $(NM) $< | awk 'BEGIN {size = 0} /__bss_size/ {size = $$1} END {print "ibase=16; " toupper(size)}' | bc); \
 	dd if=/dev/zero of=$@ bs=1 count=$${bss_size_str} 2>/dev/null;
 
-# Pass the original device tree file through fdtgrep twice. The first pass
-# removes any unwanted nodes (i.e. those which don't have the
-# 'u-boot,dm-pre-reloc' property and thus are not needed by SPL. The second
-# pass removes various unused properties from the remaining nodes.
-# The output is typically a much smaller device tree file.
 ifeq ($(CONFIG_TPL_BUILD),y)
-fdtgrep_props := -b u-boot,dm-pre-reloc -b u-boot,dm-tpl
+$(obj)/$(SPL_BIN).dtb: dts/dt-tpl.dtb FORCE
+	$(call if_changed,copy)
 else
-fdtgrep_props := -b u-boot,dm-pre-reloc -b u-boot,dm-spl
+$(obj)/$(SPL_BIN).dtb: dts/dt-spl.dtb FORCE
+	$(call if_changed,copy)
 endif
-quiet_cmd_fdtgrep = FDTGREP $@
-      cmd_fdtgrep = $(objtree)/tools/fdtgrep $(fdtgrep_props) -RT $< \
-		-n /chosen -n /config -O dtb | \
-	$(objtree)/tools/fdtgrep -r -O dtb - -o $@ \
-		$(addprefix -P ,$(subst $\",,$(CONFIG_OF_SPL_REMOVE_PROPS)))
 
-$(obj)/$(SPL_BIN).dtb: dts/dt.dtb $(objtree)/tools/fdtgrep FORCE
-	$(call if_changed,fdtgrep)
-
-pythonpath = PYTHONPATH=tools
+pythonpath = PYTHONPATH=scripts/dtc/pylibfdt
 
 quiet_cmd_dtocc = DTOC C  $@
 cmd_dtocc = $(pythonpath) $(srctree)/tools/dtoc/dtoc -d $(obj)/$(SPL_BIN).dtb -o $@ platdata
@@ -257,17 +268,18 @@ cmd_dtoch = $(pythonpath) $(srctree)/tools/dtoc/dtoc -d $(obj)/$(SPL_BIN).dtb -o
 quiet_cmd_plat = PLAT    $@
 cmd_plat = $(CC) $(c_flags) -c $< -o $@
 
-$(obj)/dts/dt-platdata.o: $(obj)/dts/dt-platdata.c include/generated/dt-structs.h
+$(obj)/dts/dt-platdata.o: $(obj)/dts/dt-platdata.c \
+		include/generated/dt-structs-gen.h
 	$(call if_changed,plat)
 
 PHONY += dts_dir
 dts_dir:
 	$(shell [ -d $(obj)/dts ] || mkdir -p $(obj)/dts)
 
-include/generated/dt-structs.h: $(obj)/$(SPL_BIN).dtb dts_dir checkdtoc
+include/generated/dt-structs-gen.h: $(obj)/$(SPL_BIN).dtb dts_dir FORCE
 	$(call if_changed,dtoch)
 
-$(obj)/dts/dt-platdata.c: $(obj)/$(SPL_BIN).dtb dts_dir checkdtoc
+$(obj)/dts/dt-platdata.c: $(obj)/$(SPL_BIN).dtb dts_dir FORCE
 	$(call if_changed,dtocc)
 
 ifdef CONFIG_SAMSUNG
@@ -339,7 +351,8 @@ quiet_cmd_u-boot-spl ?= LD      $@
 		       $(patsubst $(obj)/%,%,$(u-boot-spl-main))  \
 		       $(patsubst $(obj)/%,%,$(u-boot-spl-platdata)) \
 		       --end-group \
-		       $(PLATFORM_LIBS) -Map $(SPL_BIN).map -o $(SPL_BIN))
+		       $(PLATFORM_LIBS) -Map $(SPL_BIN).map -o $(SPL_BIN) && \
+		       $(OBJDUMP) -t $(SPL_BIN) > $(SPL_BIN).sym)
 
 $(obj)/$(SPL_BIN): $(u-boot-spl-platdata) $(u-boot-spl-init) \
 		$(u-boot-spl-main) $(obj)/u-boot-spl.lds FORCE
@@ -368,20 +381,31 @@ ifneq ($(cmd_files),)
   include $(cmd_files)
 endif
 
-checkdtoc: tools
-	@if ! ( echo 'import libfdt' | ( PYTHONPATH=tools $(PYTHON) )); then \
-		echo '*** dtoc needs the Python libfdt library. Either '; \
-		echo '*** install it on your system, or try:'; \
-		echo '***'; \
-		echo '*** sudo apt-get install swig libpython-dev'; \
-		echo '***'; \
-		echo '*** to have U-Boot build its own version.'; \
-		false; \
-	fi
-
 PHONY += FORCE
 FORCE:
+
+PHONY += dtbs
+dtbs:
+	$(Q)$(MAKE) $(build)=dts dtbs
 
 # Declare the contents of the .PHONY variable as phony.  We keep that
 # information in a variable so we can use it in if_changed and friends.
 .PHONY: $(PHONY)
+
+SHRUNK_ARCH_DTB = $(patsubst %,$(obj)/dts/%.dtb,$(subst ",,$(CONFIG_SPL_OF_LIST)))
+.SECONDEXPANSION:
+$(SHRUNK_ARCH_DTB): $$(patsubst $(obj)/dts/%, arch/$(ARCH)/dts/%, $$@)
+	$(call if_changed,fdtgrep)
+
+MKIMAGEFLAGS_$(SPL_BIN).multidtb.fit = -f auto -A $(ARCH) -T firmware -C none -O u-boot \
+	-n "Multi DTB fit image for $(SPL_BIN)" -E \
+	$(patsubst %,-b %,$(SHRUNK_ARCH_DTB))
+
+$(obj)/$(SPL_BIN).multidtb.fit: /dev/null $(SHRUNK_ARCH_DTB) FORCE
+	$(call if_changed,mkimage)
+
+$(obj)/$(SPL_BIN).multidtb.fit.gz: $(obj)/$(SPL_BIN).multidtb.fit
+	@gzip -kf9 $< > $@
+
+$(obj)/$(SPL_BIN).multidtb.fit.lzo: $(obj)/$(SPL_BIN).multidtb.fit
+	@lzop -f9 $< > $@

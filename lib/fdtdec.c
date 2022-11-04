@@ -4,17 +4,18 @@
  */
 
 #ifndef USE_HOSTCC
-#include <boot_fit.h>
 #include <common.h>
+#include <boot_fit.h>
 #include <dm.h>
-#include <errno.h>
-#include <serial.h>
-#include <libfdt.h>
-#include <fdt_support.h>
-#include <fdtdec.h>
-#include <asm/sections.h>
 #include <dm/of_extra.h>
+#include <errno.h>
+#include <fdtdec.h>
+#include <fdt_support.h>
+#include <linux/libfdt.h>
+#include <serial.h>
+#include <asm/sections.h>
 #include <linux/ctype.h>
+#include <linux/lzo.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -70,6 +71,7 @@ static const char * const compat_names[COMPAT_COUNT] = {
 	COMPAT(ALTERA_SOCFPGA_F2SDR0, "altr,socfpga-fpga2sdram0-bridge"),
 	COMPAT(ALTERA_SOCFPGA_F2SDR1, "altr,socfpga-fpga2sdram1-bridge"),
 	COMPAT(ALTERA_SOCFPGA_F2SDR2, "altr,socfpga-fpga2sdram2-bridge"),
+	COMPAT(ROCKCHIP_NANDC, "rockchip,rk-nandc"),
 };
 
 const char *fdtdec_get_compatible(enum fdt_compat_id id)
@@ -89,16 +91,6 @@ fdt_addr_t fdtdec_get_addr_size_fixed(const void *blob, int node,
 	fdt_addr_t addr;
 
 	debug("%s: %s: ", __func__, prop_name);
-
-	if (na > (sizeof(fdt_addr_t) / sizeof(fdt32_t))) {
-		debug("(na too large for fdt_addr_t type)\n");
-		return FDT_ADDR_T_NONE;
-	}
-
-	if (ns > (sizeof(fdt_size_t) / sizeof(fdt32_t))) {
-		debug("(ns too large for fdt_size_t type)\n");
-		return FDT_ADDR_T_NONE;
-	}
 
 	prop = fdt_getprop(blob, node, prop_name, &len);
 	if (!prop) {
@@ -194,7 +186,7 @@ fdt_addr_t fdtdec_get_addr(const void *blob, int node,
 	return fdtdec_get_addr_size(blob, node, prop_name, NULL);
 }
 
-#if defined(CONFIG_PCI) && defined(CONFIG_DM_PCI)
+#if defined(CONFIG_PCI) && CONFIG_IS_ENABLED(DM_PCI)
 int fdtdec_get_pci_addr(const void *blob, int node, enum fdt_pci_space type,
 		const char *prop_name, struct fdt_pci_addr *addr)
 {
@@ -1173,21 +1165,33 @@ int fdtdec_setup_memory_size(void)
 #if defined(CONFIG_NR_DRAM_BANKS)
 int fdtdec_setup_memory_banksize(void)
 {
-	int bank, ret, mem;
+	int bank, ret, mem, reg = 0;
 	struct fdt_resource res;
 
-	mem = fdt_path_offset(gd->fdt_blob, "/memory");
+	mem = fdt_node_offset_by_prop_value(gd->fdt_blob, -1, "device_type",
+					    "memory", 7);
 	if (mem < 0) {
 		debug("%s: Missing /memory node\n", __func__);
 		return -EINVAL;
 	}
 
 	for (bank = 0; bank < CONFIG_NR_DRAM_BANKS; bank++) {
-		ret = fdt_get_resource(gd->fdt_blob, mem, "reg", bank, &res);
-		if (ret == -FDT_ERR_NOTFOUND)
-			break;
-		if (ret != 0)
+		ret = fdt_get_resource(gd->fdt_blob, mem, "reg", reg++, &res);
+		if (ret == -FDT_ERR_NOTFOUND) {
+			reg = 0;
+			mem = fdt_node_offset_by_prop_value(gd->fdt_blob, mem,
+							    "device_type",
+							    "memory", 7);
+			if (mem == -FDT_ERR_NOTFOUND)
+				break;
+
+			ret = fdt_get_resource(gd->fdt_blob, mem, "reg", reg++, &res);
+			if (ret == -FDT_ERR_NOTFOUND)
+				break;
+		}
+		if (ret != 0) {
 			return -EINVAL;
+		}
 
 		gd->bd->bi_dram[bank].start = (phys_addr_t)res.start;
 		gd->bd->bi_dram[bank].size =
@@ -1203,12 +1207,73 @@ int fdtdec_setup_memory_banksize(void)
 }
 #endif
 
+#if CONFIG_IS_ENABLED(MULTI_DTB_FIT)
+# if CONFIG_IS_ENABLED(MULTI_DTB_FIT_GZIP) ||\
+	CONFIG_IS_ENABLED(MULTI_DTB_FIT_LZO)
+static int uncompress_blob(const void *src, ulong sz_src, void **dstp)
+{
+	size_t sz_out = CONFIG_SPL_MULTI_DTB_FIT_UNCOMPRESS_SZ;
+	ulong sz_in = sz_src;
+	void *dst;
+	int rc;
+
+	if (CONFIG_IS_ENABLED(GZIP))
+		if (gzip_parse_header(src, sz_in) < 0)
+			return -1;
+	if (CONFIG_IS_ENABLED(LZO))
+		if (!lzop_is_valid_header(src))
+			return -EBADMSG;
+
+	if (CONFIG_IS_ENABLED(MULTI_DTB_FIT_DYN_ALLOC)) {
+		dst = malloc(sz_out);
+		if (!dst) {
+			puts("uncompress_blob: Unable to allocate memory\n");
+			return -ENOMEM;
+		}
+	} else  {
+#  if CONFIG_IS_ENABLED(MULTI_DTB_FIT_USER_DEFINED_AREA)
+		dst = (void *)CONFIG_VAL(MULTI_DTB_FIT_USER_DEF_ADDR);
+#  else
+		return -ENOTSUPP;
+#  endif
+	}
+
+	if (CONFIG_IS_ENABLED(GZIP))
+		rc = gunzip(dst, sz_out, (u8 *)src, &sz_in);
+	else if (CONFIG_IS_ENABLED(LZO))
+		rc = lzop_decompress(src, sz_in, dst, &sz_out);
+
+	if (rc < 0) {
+		/* not a valid compressed blob */
+		puts("uncompress_blob: Unable to uncompress\n");
+		if (CONFIG_IS_ENABLED(MULTI_DTB_FIT_DYN_ALLOC))
+			free(dst);
+		return -EBADMSG;
+	}
+	*dstp = dst;
+	return 0;
+}
+# else
+static int uncompress_blob(const void *src, ulong sz_src, void **dstp)
+{
+	return -ENOTSUPP;
+}
+# endif
+#endif
+
 int fdtdec_setup(void)
 {
 #if CONFIG_IS_ENABLED(OF_CONTROL)
+# if CONFIG_IS_ENABLED(MULTI_DTB_FIT)
+	void *fdt_blob;
+# endif
 # ifdef CONFIG_OF_EMBED
 	/* Get a pointer to the FDT */
+#  ifdef CONFIG_SPL_BUILD
+	gd->fdt_blob = __dtb_dt_spl_begin;
+#  else
 	gd->fdt_blob = __dtb_dt_begin;
+#  endif
 # elif defined CONFIG_OF_SEPARATE
 #  ifdef CONFIG_SPL_BUILD
 	/* FDT is at end of BSS unless it is in a different memory region */
@@ -1216,18 +1281,16 @@ int fdtdec_setup(void)
 		gd->fdt_blob = (ulong *)&_image_binary_end;
 	else
 		gd->fdt_blob = (ulong *)&__bss_end;
-
-#  elif defined CONFIG_FIT_EMBED
-	gd->fdt_blob = locate_dtb_in_fit(&_end);
-
-	if (gd->fdt_blob == NULL || gd->fdt_blob <= ((void *)&_end)) {
-		puts("Failed to find proper dtb in embedded FIT Image\n");
-		return -1;
-	}
-
 #  else
 	/* FDT is at end of image */
 	gd->fdt_blob = (ulong *)&_end;
+
+#    ifdef CONFIG_USING_KERNEL_DTB
+	gd->fdt_blob_kern = (ulong *)ALIGN((ulong)gd->fdt_blob +
+				fdt_totalsize(gd->fdt_blob), 8);
+	if (fdt_check_header(gd->fdt_blob_kern))
+		gd->fdt_blob_kern = NULL;
+#    endif
 #  endif
 # elif defined(CONFIG_OF_BOARD)
 	/* Allow the board to override the fdt address. */
@@ -1240,10 +1303,34 @@ int fdtdec_setup(void)
 # endif
 # ifndef CONFIG_SPL_BUILD
 	/* Allow the early environment to override the fdt address */
+#  if CONFIG_IS_ENABLED(OF_PRIOR_STAGE)
+	gd->fdt_blob = (void *)prior_stage_fdt_address;
+#  else
 	gd->fdt_blob = (void *)env_get_ulong("fdtcontroladdr", 16,
 						(uintptr_t)gd->fdt_blob);
+#  endif
+# endif
+
+# if CONFIG_IS_ENABLED(MULTI_DTB_FIT)
+	/*
+	 * Try and uncompress the blob.
+	 * Unfortunately there is no way to know how big the input blob really
+	 * is. So let us set the maximum input size arbitrarily high. 16MB
+	 * ought to be more than enough for packed DTBs.
+	 */
+	if (uncompress_blob(gd->fdt_blob, 0x1000000, &fdt_blob) == 0)
+		gd->fdt_blob = fdt_blob;
+
+	/*
+	 * Check if blob is a FIT images containings DTBs.
+	 * If so, pick the most relevant
+	 */
+	fdt_blob = locate_dtb_in_fit(gd->fdt_blob);
+	if (fdt_blob)
+		gd->fdt_blob = fdt_blob;
 # endif
 #endif
+
 	return fdtdec_prepare_fdt();
 }
 

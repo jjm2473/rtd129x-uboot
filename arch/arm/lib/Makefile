@@ -17,7 +17,13 @@ else
 obj-y	+= vectors.o crt0.o
 endif
 
-ifndef CONFIG_SPL_BUILD
+ifdef CONFIG_ARM64
+obj-y   += setjmp_aarch64.o
+else
+obj-y   += setjmp.o
+endif
+
+ifndef CONFIG_TPL_BUILD
 ifdef CONFIG_ARM64
 obj-y	+= relocate_64.o
 else
@@ -49,8 +55,10 @@ ifneq ($(CONFIG_GICV2)$(CONFIG_GICV3),)
 obj-y	+= gic_64.o
 endif
 obj-y	+= interrupts_64.o
+obj-y	+= stacktrace_64.o
 else
 obj-y	+= interrupts.o
+obj-y	+= stacktrace.o
 endif
 ifndef CONFIG_SYSRESET
 obj-y	+= reset.o
