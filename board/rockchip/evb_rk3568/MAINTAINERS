@@ -4,6 +4,11 @@ S:	Maintained
 F:	configs/bpi-r2-pro-rk3568_defconfig
 F:	arch/arm/dts/rk3568-bpi-r2-pro*
 
+EASEPI-R1
+M:	Liangbin Lian <jjm2473@gmail.com>
+S:	Maintained
+F:	configs/easepi-r1-rk3568_defconfig
+
 EVB-RK3568
 M:	Joseph Chen <chenjh@rock-chips.com>
 S:	Maintained
